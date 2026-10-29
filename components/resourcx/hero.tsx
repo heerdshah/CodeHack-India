@@ -1,81 +1,57 @@
-'use client'
-
-import { motion, useMotionTemplate, useReducedMotion, useScroll, useTransform } from 'framer-motion'
+import { ArrowRight } from 'lucide-react'
 import Image from 'next/image'
-import { useRef } from 'react'
+import Link from 'next/link'
 
 export function Hero() {
-  const ref = useRef<HTMLElement>(null)
-  const reduce = useReducedMotion()
-  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] })
-
-  const t = useTransform(scrollYProgress, [0, 0.8], [0, 1], { clamp: true })
-  // Card settles at max-w-6xl (72rem) on desktop, keeps a 16px gutter on small screens.
-  const sideInset = useMotionTemplate`calc(${t} * max(16px, 50% - 36rem))`
-  const topInset = useMotionTemplate`calc(${t} * 15svh)`
-  const bottomInset = useMotionTemplate`calc(${t} * 12svh)`
-  const radius = useMotionTemplate`calc(${t} * 24px)`
-  const borderColor = useMotionTemplate`rgba(255,255,255,calc(${t} * 0.12))`
-  const imageScale = useTransform(t, [0, 1], [1.12, 1])
-  const headlineOpacity = useTransform(scrollYProgress, [0, 0.45], [1, 0])
-  const headlineY = useTransform(scrollYProgress, [0, 0.45], [0, -80])
-  const captionOpacity = useTransform(scrollYProgress, [0.55, 0.85], [0, 1])
-  const hintOpacity = useTransform(scrollYProgress, [0, 0.1], [1, 0])
-
   return (
-    <section ref={ref} id="top" aria-labelledby="hero-title" className="relative h-[210svh] bg-ink">
-      <div className="sticky top-0 h-svh overflow-hidden">
-        <motion.div
-          className="absolute overflow-hidden border shadow-2xl shadow-black/60"
-          style={
-            reduce
-              ? { inset: 0 }
-              : { top: topInset, bottom: bottomInset, left: sideInset, right: sideInset, borderRadius: radius, borderColor }
-          }
+    <section
+      id="top"
+      aria-labelledby="hero-title"
+      className="relative isolate min-h-svh overflow-hidden bg-[#F6F2EA] text-white"
+    >
+      {/* Full-screen hero image */}
+      <Image
+        src="https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?q=80&w=1600&auto=format&fit=crop"
+        alt="Bright shared learning space"
+        fill
+        priority
+        sizes="100vw"
+        className="absolute inset-0 -z-20 object-cover object-center"
+      />
+
+      {/* Very subtle overlay: keep the image visible */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-black/15"
+      />
+
+      {/* Smooth fade from the hero image into black */}
+<div
+  aria-hidden="true"
+  className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-40 bg-gradient-to-b from-transparent via-black/60 to-black"
+/>
+
+
+      {/* Hero content */}
+      <div className="mx-auto flex min-h-svh w-full max-w-6xl flex-col items-center justify-center px-5 pb-20 pt-28 text-center sm:px-6">
+        <h1
+          id="hero-title"
+          className="max-w-4xl text-balance font-display text-[clamp(2.75rem,8vw,6.5rem)] font-medium leading-[0.95] tracking-tight text-white drop-shadow-sm"
         >
-          <motion.div className="absolute inset-0" style={{ scale: reduce ? 1 : imageScale }}>
-            <Image
-              src="/images/hero-library.png"
-              alt="Timber-framed library hall with globe pendant lights, bookshelf staircase, and tall glazing onto a garden"
-              fill
-              priority
-              sizes="100vw"
-              className="object-cover"
-            />
-          </motion.div>
-          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-black/40" aria-hidden />
+          We shape space into purpose
+        </h1>
 
-          <motion.div
-            className="absolute inset-x-0 bottom-0 px-5 pb-12 sm:px-10 sm:pb-16"
-            style={{ opacity: headlineOpacity, y: headlineY }}
-          >
-            <p className="mb-5 text-xs uppercase tracking-[0.25em] text-cream/90">Equipment · Lab Spaces · Technical Assets</p>
-            <h1
-              id="hero-title"
-              className="max-w-5xl text-balance font-display text-[clamp(2.4rem,8.5vw,7.25rem)] font-medium leading-[0.92] tracking-tight text-white"
-            >
-              We shape underused assets into institutional purpose.
-            </h1>
-          </motion.div>
+        <p className="mt-6 max-w-2xl text-pretty text-base text-white/90 sm:text-lg">
+          Unlocking Capital. Empowering Shared Innovation for Everyone.
+        </p>
 
-          <motion.div
-            className="absolute inset-x-0 bottom-0 flex flex-col gap-3 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-8"
-            style={{ opacity: captionOpacity }}
-            aria-hidden
-          >
-            <p className="max-w-sm font-display text-lg leading-snug text-white sm:text-2xl">
-              One campus. Every lab, studio, and instrument — shared on trust.
-            </p>
-            <p className="text-xs uppercase tracking-widest text-cream/80">Fig. 01 — Central Library Commons</p>
-          </motion.div>
-        </motion.div>
-
-        <motion.p
-          style={{ opacity: hintOpacity }}
-          className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-[0.3em] text-white/70"
+        <Link
+          href="/explore"
+          className="mt-9 inline-flex items-center gap-2.5 rounded-full bg-[#F6F2EA] px-7 py-3.5 text-sm font-semibold text-[#292821] shadow-xl transition hover:bg-white"
         >
-          Scroll
-        </motion.p>
+          Explore Full Catalog
+          <ArrowRight className="size-4" aria-hidden="true" />
+        </Link>
       </div>
     </section>
   )
