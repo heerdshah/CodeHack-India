@@ -19,3 +19,6 @@ node_modules/
 
 # Python virtual env
 venv/
+
+.next
+backend/.next/
