@@ -17,3 +17,8 @@ pytest>=8.3.0
 pytest-asyncio>=0.24.0
 pillow>=10.4.0
 
+# Shreya's additions
+google-generativeai==0.8.3
+upstash-redis==1.3.0
+slowapi==0.1.9
+resend==0.7.0

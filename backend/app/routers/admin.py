@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import JSONResponse
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from backend.app.schemas.user import UserRoleUpdateRequest
@@ -56,7 +58,28 @@ async def get_audit_logs(
 ):
     return await audit_repo.list_logs(entity_type=entity_type, actor_id=actor_id, limit=limit)
 
+@router.get("/audit/export")
+async def export_audit_logs(
+    booking_id: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    actor_id: Optional[str] = None,
+    from_date: Optional[datetime] = None,
+    to_date: Optional[datetime] = None,
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Export audit logs as JSON file for institutional compliance.
+    """
+    logs = await audit_repo.list_logs(
+        entity_type="booking" if booking_id else ("resource" if resource_id else None),
+        actor_id=actor_id,
+        limit=1000
+    )
+    return JSONResponse(
+        content={"logs": logs, "count": len(logs), "exported_at": datetime.utcnow().isoformat()},
+        headers={"Content-Disposition": "attachment; filename=availo_audit_export.json"}
+    )
+
 @router.get("/suspicious-flags")
 async def get_suspicious_flags(current_user: dict = Depends(require_manager)):
     return await audit_repo.list_flags()
-

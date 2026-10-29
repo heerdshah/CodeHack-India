@@ -38,6 +38,20 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     SMTP_FROM: str = "no-reply@resourcx.edu"
     RESEND_API_KEY: Optional[str] = None
+    RESEND_FROM_EMAIL: str = "notifications@availo.app"
+
+    # Gemini API
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
+    # Upstash Redis
+    UPSTASH_REDIS_URL: str = ""
+    UPSTASH_REDIS_TOKEN: str = ""
+
+    # Fair Use & Bookings
+    MAX_ACTIVE_BOOKINGS_PER_USER: int = 3
+    MAX_BOOKINGS_PER_RESOURCE_PER_WEEK: int = 2
+    WAITLIST_AUTO_PROMOTE_MINUTES: int = 30
 
     model_config = SettingsConfigDict(
         env_file=(str(Path(__file__).parent.parent.parent / ".env"), str(Path(__file__).parent.parent.parent.parent / ".env")),
