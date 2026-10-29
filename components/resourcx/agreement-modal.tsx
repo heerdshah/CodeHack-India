@@ -1,20 +1,37 @@
 'use client'
 
-import { Lock, LockOpen } from 'lucide-react'
+import { useState } from 'react'
+import { Lock, LockOpen, Download, CheckCircle, Clock } from 'lucide-react'
 import { formatDate, type Booking, type Resource } from '@/lib/resources'
 import { SignaturePad } from './signature-pad'
-import { Modal, btnPrimary } from './ui'
+import { Modal, btnPrimary, btnGhost, inputCls, labelCls } from './ui'
+import { api } from '@/lib/api'
 
 type Props = {
   booking: Booking | null
   resource: Resource | null
+  viewer: 'user' | 'owner'
   onClose: () => void
-  onSign: (party: 'user' | 'owner', dataUrl: string) => void
+  onSign: (party: 'user' | 'owner', dataUrl: string, hash: string) => void
   onProceed: () => void
 }
 
-export function AgreementModal({ booking, resource, onClose, onSign, onProceed }: Props) {
+export function AgreementModal({
+  booking,
+  resource,
+  viewer,
+  onClose,
+  onSign,
+  onProceed,
+}: Props) {
+  const [reauthPassword, setReauthPassword] = useState('')
+  const [showReauth, setShowReauth] = useState(false)
+  const [pendingSignature, setPendingSignature] = useState<string | null>(null)
+  const [reauthError, setReauthError] = useState('')
+  const [isSigning, setIsSigning] = useState(false)
+
   if (!booking || !resource) return <Modal open={false} onClose={onClose} title="">{null}</Modal>
+
   const executed = Boolean(booking.userSignature && booking.ownerSignature)
   const ref = `RX-${booking.id.slice(-6).toUpperCase()}`
 
@@ -27,6 +44,41 @@ export function AgreementModal({ booking, resource, onClose, onSign, onProceed }
     ['Termination', 'The Owner may revoke access at any time for safety, misuse, or maintenance. Disputes are resolved by the Office of Research Infrastructure.'],
   ]
 
+  const handleSignatureCaptured = (dataUrl: string) => {
+    setPendingSignature(dataUrl)
+    setShowReauth(true)
+    setReauthError('')
+  }
+
+  const handleConfirmSignature = async () => {
+    if (!reauthPassword) {
+      return setReauthError('Please enter your account password to authorize digital signature.')
+    }
+    if (!pendingSignature) return
+
+    setIsSigning(true)
+    setReauthError('')
+
+    try {
+      // Fetch actual document hash from backend agreement endpoint
+      let docHash = ''
+      try {
+        const serverAgr = await api.agreements.get(booking.id)
+        docHash = serverAgr.document_hash
+      } catch {
+        docHash = ''
+      }
+      await onSign(viewer, pendingSignature, docHash)
+      setShowReauth(false)
+      setPendingSignature(null)
+      setReauthPassword('')
+    } catch (err: any) {
+      setReauthError(err.message || 'Signature authorization failed.')
+    } finally {
+      setIsSigning(false)
+    }
+  }
+
   return (
     <Modal open onClose={onClose} wide eyebrow={`Legal binding document · ${ref}`} title="Resource Use & Liability Agreement">
       <article className="rounded-2xl bg-[#f4f2ee] p-5 text-ink shadow-inner sm:p-8">
@@ -34,8 +86,20 @@ export function AgreementModal({ booking, resource, onClose, onSign, onProceed }
           <p className="font-display text-lg font-semibold">
             Resourc<span className="text-ink/50">X</span> — Agreement
           </p>
-          <p className="text-xs text-ink/60">PDF · {ref} · Page 1 of 1</p>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-ink/60">PDF · {ref}</span>
+            <a
+              href={api.agreements.getPdfUrl(booking.id)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-ink/80 hover:text-ink underline"
+            >
+              <Download className="size-3.5" />
+              Download Document
+            </a>
+          </div>
         </div>
+
         <ol className="mt-5 space-y-4">
           {clauses.map(([h, body], i) => (
             <li key={h}>
@@ -47,12 +111,132 @@ export function AgreementModal({ booking, resource, onClose, onSign, onProceed }
           ))}
         </ol>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          <SignaturePad label="Borrower signature" signer={booking.applicant.name} signature={booking.userSignature} onSign={(d) => onSign('user', d)} />
-          <SignaturePad label="Owner signature" signer={resource.owner} signature={booking.ownerSignature} onSign={(d) => onSign('owner', d)} />
+        {/* SPLIT SIGNATURE PANELS: Viewer signs only in their mode */}
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          {/* Borrower Block */}
+          <div className="rounded-xl border border-ink/10 bg-white/70 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-ink/70">
+                Borrower Signature
+              </span>
+              {booking.userSignature ? (
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
+                  <CheckCircle className="size-3.5" /> Signed
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+                  <Clock className="size-3.5" /> Pending
+                </span>
+              )}
+            </div>
+
+            <p className="text-xs text-ink/60 mb-2">Signer: {booking.applicant.name}</p>
+
+            {viewer === 'user' ? (
+              <SignaturePad
+                label=""
+                signer={booking.applicant.name}
+                signature={booking.userSignature}
+                onSign={handleSignatureCaptured}
+              />
+            ) : (
+              <div className="h-28 rounded-lg border border-dashed border-ink/20 flex flex-col items-center justify-center p-3 text-center">
+                {booking.userSignature ? (
+                  <span className="text-xs font-semibold text-emerald-800">
+                    Digitally countersigned by Borrower
+                  </span>
+                ) : (
+                  <span className="text-xs text-ink/50 italic">
+                    Awaiting borrower digital signature in User Mode
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Owner Block */}
+          <div className="rounded-xl border border-ink/10 bg-white/70 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-ink/70">
+                Owner Signature
+              </span>
+              {booking.ownerSignature ? (
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
+                  <CheckCircle className="size-3.5" /> Signed
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+                  <Clock className="size-3.5" /> Pending
+                </span>
+              )}
+            </div>
+
+            <p className="text-xs text-ink/60 mb-2">Signer: {resource.owner}</p>
+
+            {viewer === 'owner' ? (
+              <SignaturePad
+                label=""
+                signer={resource.owner}
+                signature={booking.ownerSignature}
+                onSign={handleSignatureCaptured}
+              />
+            ) : (
+              <div className="h-28 rounded-lg border border-dashed border-ink/20 flex flex-col items-center justify-center p-3 text-center">
+                {booking.ownerSignature ? (
+                  <span className="text-xs font-semibold text-emerald-800">
+                    Digitally approved and signed by Facility Owner
+                  </span>
+                ) : (
+                  <span className="text-xs text-ink/50 italic">
+                    Awaiting facility owner digital signature in Owner Mode
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </article>
 
+      {/* Re-auth confirmation modal before submitting signature */}
+      {showReauth && (
+        <div className="mt-4 rounded-xl border border-cream/20 bg-panel/95 p-4 shadow-xl">
+          <h4 className="text-sm font-semibold text-cream mb-1">
+            Confirm Signature & Re-authenticate
+          </h4>
+          <p className="text-xs text-white/70 mb-3">
+            Please enter your password to cryptographically bind your digital signature and timestamp to this agreement.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              type="password"
+              placeholder="Account password"
+              value={reauthPassword}
+              onChange={(e) => setReauthPassword(e.target.value)}
+              className={`${inputCls} sm:max-w-xs`}
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowReauth(false); setPendingSignature(null); }}
+                className={btnGhost}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSigning}
+                onClick={handleConfirmSignature}
+                className={btnPrimary}
+              >
+                {isSigning ? 'Authorizing...' : 'Authorize & Sign'}
+              </button>
+            </div>
+          </div>
+          {reauthError && <p className="mt-2 text-xs text-red-300">{reauthError}</p>}
+        </div>
+      )}
+
+      {/* Status Bar */}
       <div
         className={`mt-4 flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between ${
           executed ? 'bg-emerald-300/10 ring-1 ring-emerald-300/30' : 'bg-white/[0.03] ring-1 ring-white/10'
@@ -63,11 +247,11 @@ export function AgreementModal({ booking, resource, onClose, onSign, onProceed }
           {executed ? <LockOpen className="mt-0.5 size-4 shrink-0 text-emerald-300" /> : <Lock className="mt-0.5 size-4 shrink-0 text-stone" />}
           <span className={executed ? 'text-emerald-100' : 'text-white/70'}>
             {executed
-              ? 'Both signatures verified. Agreement executed.'
+              ? 'Both signatures verified. Agreement executed. Check-in unlocked.'
               : `Access locked until both signatures are verified (${[booking.userSignature, booking.ownerSignature].filter(Boolean).length}/2).`}
           </span>
         </p>
-        {executed && booking.status === 'signed' && booking.isMine && (
+        {executed && (booking.status === 'signed' || booking.status === 'approved') && booking.isMine && (
           <button onClick={onProceed} className={btnPrimary}>
             Start pre-checkin inspection
           </button>

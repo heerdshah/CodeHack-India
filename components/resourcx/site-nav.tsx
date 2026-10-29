@@ -1,8 +1,8 @@
 'use client'
 
-import { Search, UserRound } from 'lucide-react'
+import { Search, UserRound, Bell, Shield } from 'lucide-react'
 import { useState } from 'react'
-import { RESOURCES, matchesQuery, type Mode, type Resource, type UserProfile } from '@/lib/resources'
+import { matchesQuery, type Mode, type Resource, type UserProfile } from '@/lib/resources'
 
 type Props = {
   query: string
@@ -12,11 +12,33 @@ type Props = {
   user: UserProfile | null
   onProfile: () => void
   onPick: (r: Resource) => void
+  resourcesList?: Resource[]
+  unreadCount?: number
+  onToggleNotifications?: () => void
+  onOpenAdmin?: () => void
 }
 
-export function SiteNav({ query, onQuery, mode, onMode, user, onProfile, onPick }: Props) {
+export function SiteNav({
+  query,
+  onQuery,
+  mode,
+  onMode,
+  user,
+  onProfile,
+  onPick,
+  resourcesList = [],
+  unreadCount = 0,
+  onToggleNotifications,
+  onOpenAdmin,
+}: Props) {
   const [focused, setFocused] = useState(false)
-  const matches = query.trim() ? RESOURCES.filter((r) => matchesQuery(r, query)).slice(0, 5) : []
+  const matches = query.trim()
+    ? resourcesList.filter((r) => matchesQuery(r, query)).slice(0, 5)
+    : []
+
+  const isOwnerOrAdmin =
+    user && (user.systemRole === 'owner' || user.systemRole === 'admin' || user.systemRole === 'manager')
+  const isAdmin = user && user.systemRole === 'admin'
 
   const search = (
     <div className="relative w-full">
@@ -88,26 +110,60 @@ export function SiteNav({ query, onQuery, mode, onMode, user, onProfile, onPick 
             <div className="w-full max-w-md">{search}</div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2 md:gap-4">
+          <div className="flex shrink-0 items-center gap-2 md:gap-3">
             <a href="#catalogue" className="hidden text-sm text-white/80 transition hover:text-white lg:inline">
               Browse Catalogue
             </a>
-            <div role="radiogroup" aria-label="Interface mode" className="flex rounded-full border border-white/15 bg-black/30 p-0.5 text-xs">
-              {(['user', 'owner'] as Mode[]).map((m) => (
-                <button
-                  key={m}
-                  role="radio"
-                  aria-checked={mode === m}
-                  onClick={() => onMode(m)}
-                  className={`rounded-full px-2.5 py-1.5 font-medium capitalize transition sm:px-3 ${
-                    mode === m ? 'bg-cream text-ink' : 'text-white/70 hover:text-white'
-                  }`}
-                >
-                  {m}
-                  <span className="hidden sm:inline"> Mode</span>
-                </button>
-              ))}
-            </div>
+
+            {/* Admin shortcut button */}
+            {isAdmin && onOpenAdmin && (
+              <button
+                onClick={onOpenAdmin}
+                title="Admin Control Panel"
+                className="flex items-center gap-1.5 rounded-full border border-purple-500/30 bg-purple-500/10 px-2.5 py-1 text-xs font-medium text-purple-300 hover:bg-purple-500/20"
+              >
+                <Shield className="size-3.5" />
+                <span className="hidden sm:inline">Admin</span>
+              </button>
+            )}
+
+            {/* Mode toggle ONLY shown if user actually has owner role */}
+            {isOwnerOrAdmin && (
+              <div role="radiogroup" aria-label="Interface mode" className="flex rounded-full border border-white/15 bg-black/30 p-0.5 text-xs">
+                {(['user', 'owner'] as Mode[]).map((m) => (
+                  <button
+                    key={m}
+                    role="radio"
+                    aria-checked={mode === m}
+                    onClick={() => onMode(m)}
+                    className={`rounded-full px-2.5 py-1.5 font-medium capitalize transition sm:px-3 ${
+                      mode === m ? 'bg-cream text-ink' : 'text-white/70 hover:text-white'
+                    }`}
+                  >
+                    {m}
+                    <span className="hidden sm:inline"> Mode</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Notification Bell */}
+            {user && onToggleNotifications && (
+              <button
+                onClick={onToggleNotifications}
+                aria-label="View notifications"
+                className="relative grid size-9 place-items-center rounded-full border border-white/15 bg-black/30 text-white transition hover:border-cream/60"
+              >
+                <Bell className="size-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Profile Avatar / Login Button */}
             <button
               onClick={onProfile}
               aria-label={user ? `Open profile for ${user.fullName}` : 'Create account'}

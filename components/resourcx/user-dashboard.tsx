@@ -1,39 +1,93 @@
 'use client'
 
-import { BadgeCheck, FileText } from 'lucide-react'
-import { RESOURCES, formatDate, type Booking, type UserProfile, type WaitlistEntry } from '@/lib/resources'
-import { AccessPass } from './inspection-modal'
+import { BadgeCheck, FileText, Upload, AlertCircle, Clock, ShieldCheck, Flag } from 'lucide-react'
+import { useState } from 'react'
+import { formatDate, type Booking, type UserProfile, type WaitlistEntry, type Resource } from '@/lib/resources'
+import { AccessPass, StandaloneIncidentModal } from './inspection-modal'
 import { QueueWidget } from './resource-modal'
-import { StatusBadge, btnGhost, btnPrimary } from './ui'
+import { StatusBadge, btnGhost, btnPrimary, inputCls, labelCls } from './ui'
+import { api } from '@/lib/api'
 
 type Props = {
   user: UserProfile | null
   bookings: Booking[]
   waitlist: WaitlistEntry[]
+  resources: Resource[]
   onRegister: () => void
   onOpenAgreement: (id: string) => void
   onInspect: (id: string, phase: 'pre' | 'post') => void
+  onRefreshUser?: () => void
 }
 
-const res = (id: string) => RESOURCES.find((r) => r.id === id)!
+export function UserDashboard({
+  user,
+  bookings,
+  waitlist,
+  resources,
+  onRegister,
+  onOpenAgreement,
+  onInspect,
+  onRefreshUser,
+}: Props) {
+  const [uploadingCert, setUploadingCert] = useState(false)
+  const [certName, setCertName] = useState('Lab Safety Level 2 Certification')
+  const [certFile, setCertFile] = useState<File | null>(null)
+  const [uploadMsg, setUploadMsg] = useState('')
+  const [incidentResource, setIncidentResource] = useState<Resource | null>(null)
 
-export function UserDashboard({ user, bookings, waitlist, onRegister, onOpenAgreement, onInspect }: Props) {
-  if (!user)
+  const getRes = (id: string): Resource =>
+    resources.find((r) => r.id === id) || {
+      id,
+      name: 'Equipment / Lab',
+      department: 'Campus',
+      category: 'Robotics & Fabrication',
+      owner: 'Facility Owner',
+      location: 'Campus Building',
+      image: '/images/res-robotics.jpg',
+      description: '',
+      condition: 'Good',
+      criteria: [],
+      bookedUntil: null,
+      queue: 0,
+      latitude: 0,
+      longitude: 0,
+    }
+
+  if (!user) {
     return (
       <div className="rounded-3xl border border-white/10 bg-panel p-6 text-center sm:p-10">
         <p className="font-display text-2xl font-medium">Your profile lives here.</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-stone">
-          Register with your institutional email to track reservations, agreements, queue positions, and inspections.
+          Sign in or register with your institutional email to manage bookings, sign agreements, and view inspections.
         </p>
-        <button onClick={onRegister} className={`${btnPrimary} mt-6`}>Create verified account</button>
+        <button onClick={onRegister} className={`${btnPrimary} mt-6`}>
+          Sign In or Register
+        </button>
       </div>
     )
+  }
 
-  const signed = bookings.filter((b) => b.userSignature && b.ownerSignature)
-  const inspected = bookings.filter((b) => b.pre || b.post)
+  const handleUploadCert = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!certFile) return
+    setUploadingCert(true)
+    setUploadMsg('AI verifying certificate...')
+    try {
+      const fd = new FormData()
+      fd.append('file', certFile)
+      fd.append('credential_name', certName)
+      const res = await api.verification.upload(fd)
+      setUploadMsg(`Submitted! Status: ${res.status.replace(/_/g, ' ')}. Sent to owner queue.`)
+      onRefreshUser?.()
+    } catch (err: any) {
+      setUploadMsg(`Error: ${err.message}`)
+    } finally {
+      setUploadingCert(false)
+    }
+  }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
+    <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
       <aside className="space-y-5">
         <div className="rounded-3xl border border-white/10 bg-panel p-5">
           <div className="flex items-center gap-3">
@@ -43,32 +97,70 @@ export function UserDashboard({ user, bookings, waitlist, onRegister, onOpenAgre
             <div className="min-w-0">
               <p className="truncate font-medium">{user.fullName}</p>
               <p className="truncate text-xs text-stone">{user.email}</p>
+              <span className="inline-block mt-0.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-cream">
+                {user.systemRole || 'user'} role
+              </span>
             </div>
           </div>
-          <p className="mt-4 text-[11px] uppercase tracking-wider text-stone">Job badges</p>
+
+          <p className="mt-4 text-[11px] uppercase tracking-wider text-stone">Clearances & Badges</p>
           <ul className="mt-2 flex flex-wrap gap-1.5">
             <li className="inline-flex items-center gap-1 rounded-full bg-cream px-2.5 py-1 text-xs font-medium text-ink">
               <BadgeCheck className="size-3.5" aria-hidden /> Verified {user.role}
             </li>
-            <li className="rounded-full bg-white/5 px-2.5 py-1 text-xs text-white/80 ring-1 ring-white/10">{user.department}</li>
+            <li className="rounded-full bg-white/5 px-2.5 py-1 text-xs text-white/80 ring-1 ring-white/10">
+              {user.department}
+            </li>
             {user.credentials.map((c) => (
-              <li key={c} className="rounded-full bg-white/5 px-2.5 py-1 text-xs text-white/80 ring-1 ring-white/10">{c}</li>
-            ))}
-          </ul>
-          <p className="mt-5 text-[11px] uppercase tracking-wider text-stone">Verification files</p>
-          <ul className="mt-2 space-y-1.5">
-            {user.verificationFiles.map((f) => (
-              <li key={f} className="flex items-center gap-2 truncate text-sm text-white/80">
-                <FileText className="size-4 shrink-0 text-stone" aria-hidden /> {f}
+              <li key={c} className="rounded-full bg-emerald-500/10 text-emerald-300 px-2.5 py-1 text-xs ring-1 ring-emerald-500/30">
+                {c}
               </li>
             ))}
           </ul>
+
+          {/* Certificate Verification Upload Box */}
+          <div className="mt-5 border-t border-white/10 pt-4">
+            <p className="text-[11px] uppercase tracking-wider text-stone mb-2">Upload Verified Certificate</p>
+            <form onSubmit={handleUploadCert} className="space-y-2">
+              <select
+                value={certName}
+                onChange={(e) => setCertName(e.target.value)}
+                className={`${inputCls} text-xs py-1.5 [color-scheme:dark]`}
+              >
+                <option>Lab Safety Level 2 Certification</option>
+                <option>CNC Operator Clearance</option>
+                <option>Cobot Safety Certification</option>
+                <option>Chemical Hygiene Training</option>
+                <option>Biosafety Level 2 Training</option>
+                <option>Studio Induction</option>
+                <option>3D Fabrication Clearance</option>
+              </select>
+              <input
+                type="file"
+                required
+                accept=".pdf,image/*"
+                onChange={(e) => setCertFile(e.target.files?.[0] || null)}
+                className="block w-full text-xs text-stone file:mr-2 file:rounded file:border-0 file:bg-white/10 file:px-2 file:py-1 file:text-xs file:text-white"
+              />
+              <button
+                type="submit"
+                disabled={uploadingCert || !certFile}
+                className={`${btnGhost} w-full text-xs py-1.5 justify-center`}
+              >
+                <Upload className="size-3 mr-1" />
+                {uploadingCert ? 'Verifying with Groq...' : 'Upload & Verify with AI'}
+              </button>
+            </form>
+            {uploadMsg && <p className="mt-2 text-xs text-stone">{uploadMsg}</p>}
+          </div>
         </div>
 
         {waitlist.length > 0 && (
           <div className="space-y-2">
-            <p className="text-[11px] uppercase tracking-wider text-stone">Waiting list rankings</p>
-            {waitlist.map((w) => <QueueWidget key={w.id} entry={w} resourceName={res(w.resourceId).name} />)}
+            <p className="text-[11px] uppercase tracking-wider text-stone">Active Queue Rankings</p>
+            {waitlist.map((w) => (
+              <QueueWidget key={w.id} entry={w} resourceName={getRes(w.resourceId).name} />
+            ))}
           </div>
         )}
       </aside>
@@ -76,11 +168,11 @@ export function UserDashboard({ user, bookings, waitlist, onRegister, onOpenAgre
       <div className="space-y-5">
         <Panel title="Active reservations">
           {bookings.length === 0 ? (
-            <p className="text-sm text-stone">No reservations yet. Book a resource from the catalogue.</p>
+            <p className="text-sm text-stone">No reservations yet. Browse the catalogue to book equipment.</p>
           ) : (
             <ul className="space-y-3">
               {bookings.map((b) => {
-                const r = res(b.resourceId)
+                const r = getRes(b.resourceId)
                 return (
                   <li key={b.id} className="rounded-2xl bg-white/[0.03] p-4 ring-1 ring-white/10">
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -92,100 +184,115 @@ export function UserDashboard({ user, bookings, waitlist, onRegister, onOpenAgre
                       </div>
                       <StatusBadge status={b.status} />
                     </div>
-                    <BookingAction booking={b} onOpenAgreement={onOpenAgreement} onInspect={onInspect} />
+
+                    <BookingAction
+                      booking={b}
+                      resource={r}
+                      onOpenAgreement={onOpenAgreement}
+                      onInspect={onInspect}
+                      onReportIncident={() => setIncidentResource(r)}
+                    />
                   </li>
                 )
               })}
             </ul>
           )}
         </Panel>
-
-        <div className="grid gap-5 md:grid-cols-2">
-          <Panel title="Signed agreements">
-            {signed.length === 0 ? (
-              <p className="text-sm text-stone">Executed agreements appear here.</p>
-            ) : (
-              <ul className="space-y-2">
-                {signed.map((b) => (
-                  <li key={b.id}>
-                    <button onClick={() => onOpenAgreement(b.id)} className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm transition hover:bg-white/5">
-                      <FileText className="size-4 text-cream" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate">RX-{b.id.slice(-6).toUpperCase()} · {res(b.resourceId).name}</span>
-                      <span className="text-xs text-stone">PDF</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
-          <Panel title="Inspection history">
-            {inspected.length === 0 ? (
-              <p className="text-sm text-stone">Six-angle inspections appear here.</p>
-            ) : (
-              <ul className="space-y-3">
-                {inspected.map((b) => (
-                  <li key={b.id}>
-                    <p className="text-sm">{res(b.resourceId).name}</p>
-                    {(['pre', 'post'] as const).map((p) => b[p] && <InspectionStrip key={p} label={p === 'pre' ? 'Check-in' : 'Return'} set={b[p]!} />)}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
-        </div>
       </div>
+
+      {/* Standalone Incident Modal */}
+      {incidentResource && (
+        <StandaloneIncidentModal
+          open={Boolean(incidentResource)}
+          resource={incidentResource}
+          onClose={() => setIncidentResource(null)}
+          onReported={() => {
+            alert('Incident report submitted to facility managers.')
+          }}
+        />
+      )}
     </div>
   )
 }
 
-function BookingAction({ booking: b, onOpenAgreement, onInspect }: { booking: Booking; onOpenAgreement: (id: string) => void; onInspect: (id: string, phase: 'pre' | 'post') => void }) {
-  const r = res(b.resourceId)
-  switch (b.status) {
-    case 'pending':
-      return <p className="mt-3 text-sm text-white/70">Awaiting {r.owner}&apos;s review of your credentials and request.</p>
-    case 'rejected':
-      return (
-        <div className="mt-3 rounded-xl bg-red-400/10 p-3 ring-1 ring-red-400/25">
-          <p className="text-xs uppercase tracking-wider text-red-300">Owner&apos;s explanation</p>
-          <p className="mt-1 text-sm text-white/85">{b.rejectionReason}</p>
-        </div>
-      )
-    case 'approved':
-      return (
-        <button onClick={() => onOpenAgreement(b.id)} className={`${btnPrimary} mt-3 w-full sm:w-auto`}>
-          {b.userSignature ? 'View agreement — awaiting owner' : 'Review & sign agreement'}
-        </button>
-      )
-    case 'signed':
-      return <button onClick={() => onInspect(b.id, 'pre')} className={`${btnPrimary} mt-3 w-full sm:w-auto`}>Start pre-checkin inspection</button>
-    case 'active':
-      return (
-        <div className="mt-3 space-y-3">
-          {b.otp && <AccessPass otp={b.otp} resource={r} />}
-          <button onClick={() => onInspect(b.id, 'post')} className={`${btnGhost} w-full sm:w-auto`}>Return & upload post-inspection</button>
-        </div>
-      )
-    case 'returned':
-      return <p className="mt-3 text-sm text-white/70">AI scan complete. {r.owner} is manually verifying condition.</p>
-    case 'completed':
-      return <p className="mt-3 text-sm text-stone">Closed. Thank you for returning the asset in good standing.</p>
-  }
-}
+export function BookingAction({
+  booking,
+  resource,
+  onOpenAgreement,
+  onInspect,
+  onReportIncident,
+}: {
+  booking: Booking
+  resource: Resource
+  onOpenAgreement: (id: string) => void
+  onInspect: (id: string, phase: 'pre' | 'post') => void
+  onReportIncident: () => void
+}) {
+  const needsMySignature = booking.status === 'approved' && !booking.userSignature
+  const awaitingOwner = booking.status === 'approved' && Boolean(booking.userSignature) && !booking.ownerSignature
+  const signed = booking.status === 'signed' || (booking.userSignature && booking.ownerSignature)
 
-export function InspectionStrip({ label, set }: { label: string; set: NonNullable<Booking['pre']> }) {
   return (
-    <div className="mt-2">
-      <p className={`text-xs ${set.flagged ? 'text-amber-200' : 'text-stone'}`}>
-        {label} · {formatDate(set.completedAt)} · {set.findings[0]}
-      </p>
-      <ul className="mt-1.5 grid grid-cols-6 gap-1">
-        {Object.entries(set.photos).map(([angle, src]) => (
-          <li key={angle} className="relative aspect-square overflow-hidden rounded-md ring-1 ring-white/10">
-            {/* eslint-disable-next-line @next/next/no-img-element -- user-uploaded previews */}
-            <img src={src} alt={`${label} ${angle}`} className="size-full object-cover" />
-          </li>
-        ))}
-      </ul>
+    <div className="mt-4 flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
+      {needsMySignature && (
+        <button
+          onClick={() => onOpenAgreement(booking.id)}
+          className={`${btnPrimary} px-3 py-1.5 text-xs`}
+        >
+          Sign Agreement (Borrower)
+        </button>
+      )}
+
+      {awaitingOwner && (
+        <span className="flex items-center gap-1.5 text-xs text-amber-300">
+          <Clock className="size-3.5" />
+          Agreement signed by you. Awaiting owner countersignature.
+        </span>
+      )}
+
+      {signed && booking.status === 'signed' && (
+        <button
+          onClick={() => onInspect(booking.id, 'pre')}
+          className={`${btnPrimary} px-3 py-1.5 text-xs`}
+        >
+          Perform Pre-Checkin 6-Angle Inspection
+        </button>
+      )}
+
+      {booking.status === 'active' && (
+        <>
+          {booking.otp && (
+            <div className="mr-2">
+              <span className="text-xs text-stone">Access OTP: </span>
+              <strong className="text-cream font-mono text-sm tracking-wider">{booking.otp}</strong>
+            </div>
+          )}
+          <button
+            onClick={() => onInspect(booking.id, 'post')}
+            className={`${btnPrimary} px-3 py-1.5 text-xs`}
+          >
+            Perform Return 6-Angle Inspection
+          </button>
+        </>
+      )}
+
+      {booking.status === 'overdue' && (
+        <button
+          onClick={() => onInspect(booking.id, 'post')}
+          className="rounded-full bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600"
+        >
+          Overdue Return — Complete Inspection Now
+        </button>
+      )}
+
+      <button
+        onClick={onReportIncident}
+        type="button"
+        className="ml-auto inline-flex items-center gap-1 text-xs text-stone hover:text-white"
+      >
+        <Flag className="size-3 text-stone" />
+        Report Issue / Damage
+      </button>
     </div>
   )
 }
@@ -193,7 +300,7 @@ export function InspectionStrip({ label, set }: { label: string; set: NonNullabl
 export function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-3xl border border-white/10 bg-panel p-5">
-      <h3 className="mb-4 text-[11px] font-medium uppercase tracking-wider text-stone">{title}</h3>
+      <h3 className="font-display text-lg font-medium tracking-tight text-white mb-4">{title}</h3>
       {children}
     </section>
   )
