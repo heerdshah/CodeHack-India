@@ -17,7 +17,8 @@ from backend.app.routers import (
     incidents,
     agreements,
     notifications,
-    admin
+    admin,
+    chat,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -52,15 +53,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": f"Internal server error: {str(exc)}"}
     )
 
-# CORS configuration: must be the outermost middleware so CORS headers exist on errors too
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[settings.FRONTEND_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Register routers
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -72,6 +64,7 @@ app.include_router(incidents.router)
 app.include_router(agreements.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
+app.include_router(chat.router)
 
 @app.get("/")
 @app.get("/health")
@@ -84,7 +77,15 @@ async def health_check():
         "supabase_configured": bool(settings.SUPABASE_URL)
     }
 
+# Wrap the complete ASGI app so CORS headers are also present on unhandled errors.
+app = CORSMiddleware(
+    app=app,
+    allow_origins=[settings.FRONTEND_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("backend.app.main:app", host="0.0.0.0", port=8000, reload=True)
-

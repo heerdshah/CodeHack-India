@@ -1,6 +1,6 @@
 'use client'
 
-import { Search, UserRound, Bell, Shield } from 'lucide-react'
+import { Search, UserRound, Bell, Shield, MessageCircle } from 'lucide-react'
 import { useState } from 'react'
 import { matchesQuery, type Mode, type Resource, type UserProfile } from '@/lib/resources'
 
@@ -14,7 +14,9 @@ type Props = {
   onPick: (r: Resource) => void
   resourcesList?: Resource[]
   unreadCount?: number
+  chatUnreadCount?: number
   onToggleNotifications?: () => void
+  onToggleChat?: () => void
   onOpenAdmin?: () => void
 }
 
@@ -28,7 +30,9 @@ export function SiteNav({
   onPick,
   resourcesList = [],
   unreadCount = 0,
+  chatUnreadCount = 0,
   onToggleNotifications,
+  onToggleChat,
   onOpenAdmin,
 }: Props) {
   const [focused, setFocused] = useState(false)
@@ -148,6 +152,22 @@ export function SiteNav({
             )}
 
             {/* Notification Bell */}
+            {user && onToggleChat && (
+              <button
+                onClick={onToggleChat}
+                aria-label={`Open chats${chatUnreadCount > 0 ? `, ${chatUnreadCount} unread messages` : ''}`}
+                className="relative flex h-9 items-center gap-1.5 rounded-full border border-white/15 bg-black/30 px-2.5 text-white transition hover:border-cream/60"
+              >
+                <MessageCircle className="size-4" />
+                <span className="text-xs">Chats</span>
+                {chatUnreadCount > 0 && (
+                  <span className="flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                    {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             {user && onToggleNotifications && (
               <button
                 onClick={onToggleNotifications}

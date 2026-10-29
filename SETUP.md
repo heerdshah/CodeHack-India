@@ -23,6 +23,8 @@ This guide contains the exact steps to configure, seed, and launch the ResourcX 
      - Copy `Project URL` -> Set as `SUPABASE_URL` in `backend/.env`.
      - Copy `anon` `public` key -> Set as `SUPABASE_ANON_KEY` in `backend/.env` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`.
      - Copy `service_role` `secret` key -> Set as `SUPABASE_SERVICE_KEY` in `backend/.env`.
+     - Copy the project's JWT signing secret -> Set as `SUPABASE_JWT_SECRET` in `backend/.env`. This stays server-side and is used only to issue short-lived participant tokens for Realtime.
+     - Set the project URL as `NEXT_PUBLIC_SUPABASE_URL` in `.env.local`.
    - Go to **Project Settings** -> **Database** -> **Connection string** (URI):
      - Copy the connection URI (replace `[YOUR-PASSWORD]` with your real password) -> Set as `DATABASE_URL` in `backend/.env`.
 
@@ -39,11 +41,14 @@ This guide contains the exact steps to configure, seed, and launch the ResourcX 
      - `008_incidents.sql`
      - `009_notifications_audit_flags.sql`
      - `010_rls.sql`
+     - `011_chat.sql`
+     - `012_direct_username_chat.sql`
      - `storage.sql`
    - *Alternatively, run the automated migration script:*
      ```bash
      python backend/scripts/apply_migrations.py
      ```
+   - If migrations `001`–`011` have already been applied to an existing project, run only `012_direct_username_chat.sql` to enable username-started direct conversations.
 
 4. **Verify Storage Buckets**:
    - Go to **Storage** in Supabase: verify that `verification-docs`, `inspection-photos`, `incident-photos`, and `agreements` are present and marked Private.
@@ -119,4 +124,3 @@ This guide contains the exact steps to configure, seed, and launch the ResourcX 
 - **Facility Owner (Robotics / CS)**: `anders.halden@inst.edu` / `OwnerPass123!`
 - **Researcher (Borrower)**: `p.raman@inst.edu` / `UserPass123!`
 - **Student (Borrower)**: `t.reyes@inst.edu` / `UserPass123!`
-

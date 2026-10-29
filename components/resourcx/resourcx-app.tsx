@@ -23,6 +23,7 @@ import { SectionHeading } from './ui'
 import { UserDashboard } from './user-dashboard'
 import { AdminModal } from './admin-modal'
 import { NotificationsModal } from './notifications-modal'
+import { ChatModal } from './chat-modal'
 import { api, type NotificationItem } from '@/lib/api'
 
 const scrollToDashboard = () =>
@@ -42,6 +43,8 @@ export function ResourcXApp() {
   const [authOpen, setAuthOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const [notifsOpen, setNotifsOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [unreadChatsCount, setUnreadChatsCount] = useState(0)
   const [pendingResourceId, setPendingResourceId] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [agreementId, setAgreementId] = useState<string | null>(null)
@@ -191,6 +194,8 @@ export function ResourcXApp() {
         onPick={openResource}
         resourcesList={resources}
         unreadCount={unreadNotifsCount}
+        chatUnreadCount={unreadChatsCount}
+        onToggleChat={() => setChatOpen(true)}
         onToggleNotifications={() => setNotifsOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
         onProfile={() => {
@@ -304,6 +309,18 @@ export function ResourcXApp() {
         onClose={() => setNotifsOpen(false)}
         onRefresh={loadAppData}
       />
+
+      {user && (
+        <ChatModal
+          open={chatOpen}
+          user={user}
+          mode={mode}
+          bookings={bookings}
+          resources={resources}
+          onClose={() => setChatOpen(false)}
+          onUnreadCountChange={setUnreadChatsCount}
+        />
+      )}
 
       <AdminModal
         open={adminOpen}
