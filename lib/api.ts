@@ -158,6 +158,28 @@ export type Incident = {
   review_notes?: string
 }
 
+export type ChatConversation = {
+  id: string
+  booking_id: string | null
+  customer_id: string
+  seller_id: string
+  other_user: {
+    id: string
+    username: string
+    name: string
+  }
+  unread_count: number
+}
+
+export type ChatMessage = {
+  id: string
+  conversation_id: string
+  sender_id: string
+  content: string
+  is_read: boolean
+  created_at: string
+}
+
 // =============================================================================
 // API CLIENT IMPLEMENTATION
 // =============================================================================
@@ -495,6 +517,47 @@ export const api = {
     },
   },
 
+  // Direct and booking-scoped chat
+  chat: {
+    async listConversations(): Promise<ChatConversation[]> {
+      return request<ChatConversation[]>('/chat/conversations')
+    },
+
+    async createConversation(bookingId: string): Promise<ChatConversation> {
+      return request<ChatConversation>('/chat/conversations', {
+        method: 'POST',
+        body: JSON.stringify({ booking_id: bookingId }),
+      })
+    },
+
+    async createDirectConversation(username: string): Promise<ChatConversation> {
+      return request<ChatConversation>('/chat/direct', {
+        method: 'POST',
+        body: JSON.stringify({ username }),
+      })
+    },
+
+    async listMessages(conversationId: string): Promise<ChatMessage[]> {
+      return request<ChatMessage[]>(`/chat/conversations/${conversationId}/messages`)
+    },
+
+    async sendMessage(conversationId: string, content: string): Promise<ChatMessage> {
+      return request<ChatMessage>(`/chat/conversations/${conversationId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      })
+    },
+
+    async markRead(conversationId: string): Promise<void> {
+      await request(`/chat/conversations/${conversationId}/read`, { method: 'POST' })
+    },
+
+    async getRealtimeToken(): Promise<string> {
+      const result = await request<{ token: string }>('/chat/realtime-token')
+      return result.token
+    },
+  },
+
   // Admin & Operations
   admin: {
     async listUsers(): Promise<any[]> {
@@ -520,4 +583,3 @@ export const api = {
     },
   },
 }
-

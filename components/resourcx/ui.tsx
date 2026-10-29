@@ -118,6 +118,17 @@ export function Modal({
   )
 }
 
+const STATUS_META: Record<BookingStatus, { label: string; cls: string }> = {
+  pending: { label: 'Pending Owner Review', cls: 'bg-amber-300/10 text-amber-200 ring-amber-300/30' },
+  rejected: { label: 'Rejected', cls: 'bg-red-400/10 text-red-300 ring-red-400/30' },
+  approved: { label: 'Approved — Awaiting Signatures', cls: 'bg-sky-300/10 text-sky-200 ring-sky-300/30' },
+  signed: { label: 'Signed — Pre-Checkin Required', cls: 'bg-cream/10 text-cream ring-cream/30' },
+  active: { label: 'Active Access', cls: 'bg-emerald-300/10 text-emerald-200 ring-emerald-300/30' },
+  returned: { label: 'Returned — Owner Verifying', cls: 'bg-amber-300/10 text-amber-200 ring-amber-300/30' },
+  completed: { label: 'Completed', cls: 'bg-white/5 text-stone ring-white/15' },
+  waitlisted: { label: 'Waitlisted', cls: 'bg-violet-300/10 text-violet-200 ring-violet-300/30' },
+  cancelled: { label: 'Cancelled', cls: 'bg-white/5 text-stone ring-white/15' },
+  overdue: { label: 'Overdue', cls: 'bg-red-400/10 text-red-300 ring-red-400/30' },
 const STATUS_META: Record<
   BookingStatus,
   { label: string; cls: string }

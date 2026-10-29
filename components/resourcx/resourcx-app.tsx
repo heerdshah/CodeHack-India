@@ -11,6 +11,20 @@ import {
   type UserProfile,
   type WaitlistEntry,
 } from '@/lib/resources'
+import { AgreementModal } from './agreement-modal'
+import { AuthModal } from './auth-modal'
+import { Catalogue } from './catalogue'
+import { Hero } from './hero'
+import { InspectionModal } from './inspection-modal'
+import { Mission } from './mission'
+import { OwnerDashboard } from './owner-dashboard'
+import { ResourceModal } from './resource-modal'
+import { SiteNav } from './site-nav'
+import { SectionHeading } from './ui'
+import { UserDashboard } from './user-dashboard'
+import { AdminModal } from './admin-modal'
+import { NotificationsModal } from './notifications-modal'
+import { ChatModal } from './chat-modal'
 
 import { api, type NotificationItem } from '@/lib/api'
 
@@ -49,6 +63,12 @@ export function ResourcXApp() {
   // Modals state
   const [adminOpen, setAdminOpen] = useState(false)
   const [notifsOpen, setNotifsOpen] = useState(false)
+<<<<<<< HEAD
+  const [chatOpen, setChatOpen] = useState(false)
+  const [unreadChatsCount, setUnreadChatsCount] = useState(0)
+  const [pendingResourceId, setPendingResourceId] = useState<string | null>(null)
+=======
+>>>>>>> origin/main
   const [detailId, setDetailId] = useState<string | null>(null)
   const [agreementId, setAgreementId] = useState<string | null>(null)
   const [inspection, setInspection] = useState<{
@@ -252,6 +272,8 @@ export function ResourcXApp() {
         mode={mode}
         onMode={changeMode}
         unreadCount={unreadNotifsCount}
+        chatUnreadCount={unreadChatsCount}
+        onToggleChat={() => setChatOpen(true)}
         onToggleNotifications={() => setNotifsOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
         onProfile={() => router.push('/account')}
@@ -340,7 +362,22 @@ export function ResourcXApp() {
         onRefresh={loadAppData}
       />
 
+<<<<<<< HEAD
+      {user && (
+        <ChatModal
+          open={chatOpen}
+          user={user}
+          mode={mode}
+          bookings={bookings}
+          resources={resources}
+          onClose={() => setChatOpen(false)}
+          onUnreadCountChange={setUnreadChatsCount}
+        />
+      )}
+
+=======
       {/* Admin modal */}
+>>>>>>> origin/main
       <AdminModal
         open={adminOpen}
         onClose={() => setAdminOpen(false)}
