@@ -14,7 +14,7 @@ type Props = {
   bookings: Booking[]
   resources: Resource[]
   onClose: () => void
-  onUnreadCountChange: (count: number) => void
+  presentation?: 'modal' | 'page'
 }
 
 const terminalStatuses = new Set(['rejected', 'cancelled'])
@@ -26,9 +26,10 @@ export function ChatModal({
   bookings,
   resources,
   onClose,
-  onUnreadCountChange,
+  presentation = 'modal',
 }: Props) {
   const [conversations, setConversations] = useState<ChatConversation[]>([])
+  const [conversationsLoaded, setConversationsLoaded] = useState(false)
   const [selected, setSelected] = useState<ChatConversation | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [messageText, setMessageText] = useState('')
@@ -41,10 +42,6 @@ export function ChatModal({
   const messageCache = useRef(new Map<string, ChatMessage[]>())
   const openRef = useRef(open)
   openRef.current = open
-
-  useEffect(() => {
-    onUnreadCountChange(conversations.reduce((total, conversation) => total + conversation.unread_count, 0))
-  }, [conversations, onUnreadCountChange])
 
   const addMessage = useCallback((message: ChatMessage) => {
     const cached = messageCache.current.get(message.conversation_id) ?? []
@@ -73,16 +70,14 @@ export function ChatModal({
       )
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load conversations.')
+    } finally {
+      setConversationsLoaded(true)
     }
   }, [])
 
   useEffect(() => {
     void loadConversations()
   }, [loadConversations, user.id])
-
-  useEffect(() => {
-    if (open) void loadConversations()
-  }, [open, loadConversations])
 
   useEffect(() => {
     const refreshInbox = () => {
@@ -307,13 +302,20 @@ export function ChatModal({
     return booking ? resources.find((resource) => resource.id === booking.resourceId)?.name : undefined
   }
 
+  const isPage = presentation === 'page'
+
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm" role="presentation">
+    <div
+      className={isPage ? 'w-full' : 'fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm'}
+      role={isPage ? undefined : 'presentation'}
+    >
       <section
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? undefined : 'dialog'}
+        aria-modal={isPage ? undefined : true}
         aria-labelledby="chat-title"
-        className="flex h-[min(720px,92vh)] w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-panel shadow-2xl"
+        className={isPage
+          ? 'relative flex h-[calc(100dvh-6.5rem)] min-h-[24rem] w-full overflow-hidden rounded-xl border border-white/10 bg-panel shadow-2xl'
+          : 'relative flex h-[min(720px,92vh)] w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-panel shadow-2xl'}
       >
         <aside className={`${selected ? 'hidden sm:flex' : 'flex'} w-full shrink-0 flex-col border-r border-white/10 sm:w-80`}>
           <div className="flex items-center justify-between border-b border-white/10 p-4">
@@ -321,7 +323,7 @@ export function ChatModal({
               <h2 id="chat-title" className="font-display text-xl font-medium">Messages</h2>
               <p className="text-xs text-stone">Signed in as @{user.username}</p>
             </div>
-            <button onClick={onClose} aria-label="Close chat" className="rounded-full p-2 text-stone hover:bg-white/10 hover:text-white">
+            <button onClick={onClose} aria-label={isPage ? 'Back to ResourcX' : 'Close chat'} className="rounded-full p-2 text-stone hover:bg-white/10 hover:text-white">
               <X className="size-4" />
             </button>
           </div>
@@ -347,7 +349,11 @@ export function ChatModal({
                 )}
               </button>
             ))}
-            {conversations.length === 0 && <p className="px-2 py-3 text-sm text-stone">No conversations yet.</p>}
+            {conversations.length === 0 && (
+              <p className="px-2 py-3 text-sm text-stone">
+                {conversationsLoaded ? 'No conversations yet.' : 'Loading conversations…'}
+              </p>
+            )}
 
             <form onSubmit={startDirectConversation} className="mt-4 rounded-xl border border-white/10 bg-black/10 p-3">
               <label htmlFor="chat-username" className="block text-[11px] font-semibold uppercase tracking-wider text-stone">
@@ -400,7 +406,7 @@ export function ChatModal({
                   <h3 className="truncate font-medium">@{selected.other_user.username}</h3>
                   <p className="truncate text-xs text-stone">{selected.booking_id ? resourceName(selected.booking_id) || `Booking ${selected.booking_id}` : 'Direct message'}</p>
                 </div>
-                <button onClick={onClose} aria-label="Close chat" className="rounded-full p-2 text-stone hover:bg-white/10 hover:text-white">
+                <button onClick={onClose} aria-label={isPage ? 'Back to ResourcX' : 'Close chat'} className="rounded-full p-2 text-stone hover:bg-white/10 hover:text-white">
                   <X className="size-4" />
                 </button>
               </header>

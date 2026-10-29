@@ -1,17 +1,20 @@
 'use client'
 
-import { ArrowRight, Bell, Layers, MessageCircle, Shield } from 'lucide-react'
+import { ArrowRight, Bell, Layers, Shield } from 'lucide-react'
+
+import { useState } from 'react'
+import { matchesQuery, type Mode, type Resource, type UserProfile } from '@/lib/resources'
+
 import Link from 'next/link'
-import type { Mode, UserProfile } from '@/lib/resources'
+
 
 type Props = {
   user: UserProfile | null
+  authLoading?: boolean
   mode?: Mode
   onMode?: (m: Mode) => void
   unreadCount?: number
-  chatUnreadCount?: number
   onToggleNotifications?: () => void
-  onToggleChat?: () => void
   onOpenAdmin?: () => void
   onProfile?: () => void
 }
@@ -26,12 +29,11 @@ const LINKS = [
 ]
 export function SiteNav({
   user,
+  authLoading = false,
   mode,
   onMode,
   unreadCount = 0,
-  chatUnreadCount = 0,
   onToggleNotifications,
-  onToggleChat,
   onOpenAdmin,
   onProfile,
 }: Props) {
@@ -116,31 +118,20 @@ export function SiteNav({
               </div>
             )}
 
-            {/* Chat */}
-            {user && onToggleChat && (
-              <button
-                onClick={onToggleChat}
-                aria-label={`Open chats${chatUnreadCount > 0 ? `, ${chatUnreadCount} unread messages` : ''}`}
-                className="relative flex h-9 items-center gap-1.5 rounded-full border border-white/15 bg-black/30 px-2.5 text-white transition hover:border-cream/60"
-              >
-                <MessageCircle className="size-4" />
-                <span className="text-xs">Chats</span>
-                {chatUnreadCount > 0 && (
-                  <span className="flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                    {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-                  </span>
-                )}
-              </button>
-            )}
-
-            {user && onToggleNotifications && (
+            {/* Notification Bell */}
+            {(user || authLoading) && onToggleNotifications && (
               <button
                 type="button"
+                disabled={!user}
                 onClick={onToggleNotifications}
                 aria-label={`View notifications${
-                  unreadCount > 0 ? `, ${unreadCount} unread` : ''
+                  !user
+                    ? ', loading'
+                    : unreadCount > 0
+                      ? `, ${unreadCount} unread`
+                      : ''
                 }`}
-                className="relative grid size-9 place-items-center rounded-full border border-white/15 bg-black/30 text-white transition hover:border-cream/60"
+                className="relative grid size-9 place-items-center rounded-full border border-white/15 bg-black/30 text-white transition hover:border-cream/60 disabled:cursor-wait disabled:opacity-50"
               >
                 <Bell className="size-4" aria-hidden="true" />
 

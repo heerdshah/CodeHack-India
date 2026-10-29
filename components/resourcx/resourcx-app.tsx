@@ -13,12 +13,23 @@ import {
 import { AgreementModal } from './agreement-modal'
 import { Hero } from './hero'
 import { InspectionModal } from './inspection-modal'
-import { OwnerDashboard } from './owner-dashboard'
+
 import { ResourceModal } from './resource-modal'
 import { SiteNav } from './site-nav'
 import { AdminModal } from './admin-modal'
 import { NotificationsModal } from './notifications-modal'
-import { ChatModal } from './chat-modal'
+
+import { AuthModal } from './auth-modal'
+import { Catalogue } from './catalogue'
+
+
+import { Mission } from './mission'
+import { OwnerDashboard } from './owner-dashboard'
+
+import { SectionHeading } from './ui'
+import { UserDashboard } from './user-dashboard'
+
+
 import { api, type NotificationItem } from '@/lib/api'
 import { About } from './about'
 import { FeaturedResources } from './featured-resources'
@@ -43,12 +54,12 @@ export function ResourcXApp() {
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([])
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [authLoading, setAuthLoading] = useState(true)
 
   // Modals state
   const [adminOpen, setAdminOpen] = useState(false)
   const [notifsOpen, setNotifsOpen] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
-  const [unreadChatsCount, setUnreadChatsCount] = useState(0)
+  const [pendingResourceId, setPendingResourceId] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [agreementId, setAgreementId] = useState<string | null>(null)
   const [inspection, setInspection] = useState<{
@@ -62,35 +73,26 @@ export function ResourcXApp() {
     lng?: number | null
   ) => {
     try {
-      const [fetchedResources, fetchedBookings] = await Promise.all([
-        api.resources.list({ lat, lng }),
-        api.bookings.list().catch(() => []),
-      ])
-
-      setResources(fetchedResources)
-      setBookings(fetchedBookings)
-
-      // Fetch the current user session
-      try {
-        const me = await api.auth.getMe()
-
-        if (me) {
+      const resourceRequest = api.resources
+        .list({ lat, lng })
+        .then(setResources)
+      const bookingsRequest = api.bookings
+        .list()
+        .then(setBookings)
+        .catch(() => setBookings([]))
+      const userRequest = api.auth
+        .getMe()
+        .then(async (me) => {
           setUser(me)
-
-          const myNotifs = await api.notifications
-            .list()
-            .catch(() => [])
-
-          setNotifications(myNotifs)
-        } else {
+          setNotifications(await api.notifications.list().catch(() => []))
+        })
+        .catch(() => {
           setUser(null)
           setNotifications([])
-        }
-      } catch {
-        // The visitor is not authenticated.
-        setUser(null)
-        setNotifications([])
-      }
+        })
+        .finally(() => setAuthLoading(false))
+
+      await Promise.all([resourceRequest, bookingsRequest, userRequest])
     } catch (err) {
       console.error('Error loading initial ResourcX data:', err)
     } finally {
@@ -99,6 +101,15 @@ export function ResourcXApp() {
   }
 
   useEffect(() => {
+    const cachedUser = window.sessionStorage.getItem('resourcx.auth-user')
+    if (cachedUser) {
+      window.sessionStorage.removeItem('resourcx.auth-user')
+      try {
+        setUser(JSON.parse(cachedUser) as UserProfile)
+      } catch {
+        window.sessionStorage.removeItem('resourcx.auth-user')
+      }
+    }
     void loadAppData()
   }, [])
 
@@ -249,11 +260,10 @@ export function ResourcXApp() {
     <div className="min-h-screen bg-ink text-white">
       <SiteNav
         user={user}
+        authLoading={authLoading}
         mode={mode}
         onMode={changeMode}
         unreadCount={unreadNotifsCount}
-        chatUnreadCount={unreadChatsCount}
-        onToggleChat={() => setChatOpen(true)}
         onToggleNotifications={() => setNotifsOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
         onProfile={() => router.push('/account')}
@@ -341,18 +351,6 @@ export function ResourcXApp() {
         onClose={() => setNotifsOpen(false)}
         onRefresh={loadAppData}
       />
-
-      {user && (
-        <ChatModal
-          open={chatOpen}
-          user={user}
-          mode={mode}
-          bookings={bookings}
-          resources={resources}
-          onClose={() => setChatOpen(false)}
-          onUnreadCountChange={setUnreadChatsCount}
-        />
-      )}
 
       {/* Admin modal */}
       <AdminModal
