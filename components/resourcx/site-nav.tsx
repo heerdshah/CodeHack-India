@@ -1,9 +1,6 @@
 'use client'
 
-import { Search, UserRound, Bell, Shield, MessageCircle } from 'lucide-react'
-import { useState } from 'react'
-import { matchesQuery, type Mode, type Resource, type UserProfile } from '@/lib/resources'
-import { ArrowRight, Bell, Layers, Shield } from 'lucide-react'
+import { ArrowRight, Bell, Layers, MessageCircle, Shield } from 'lucide-react'
 import Link from 'next/link'
 import type { Mode, UserProfile } from '@/lib/resources'
 
@@ -119,8 +116,7 @@ export function SiteNav({
               </div>
             )}
 
-<<<<<<< HEAD
-            {/* Notification Bell */}
+            {/* Chat */}
             {user && onToggleChat && (
               <button
                 onClick={onToggleChat}
@@ -137,8 +133,6 @@ export function SiteNav({
               </button>
             )}
 
-=======
->>>>>>> origin/main
             {user && onToggleNotifications && (
               <button
                 type="button"
