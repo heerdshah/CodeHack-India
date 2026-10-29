@@ -8,34 +8,57 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:800
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
   const headers = new Headers(options.headers || {})
+  const method = (options.method || 'GET').toUpperCase()
+  const maxRetries = method === 'GET' ? 2 : 0
 
   if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    credentials: 'include', // Ensures httpOnly session cookies are transmitted
-  })
-
-  if (!response.ok) {
-    let errorDetail = 'Request failed'
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    let response: Response
     try {
-      const errJson = await response.json()
-      errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson)
-    } catch {
-      errorDetail = response.statusText || `${response.status}`
+      response = await fetch(url, {
+        ...options,
+        headers,
+        credentials: 'include', // Ensures httpOnly session cookies are transmitted
+      })
+    } catch (error) {
+      if (attempt < maxRetries && error instanceof TypeError) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
+        continue
+      }
+      throw error
     }
-    throw new Error(errorDetail)
+
+    if (!response.ok) {
+      let errorDetail = 'Request failed'
+      try {
+        const errJson = await response.json()
+        errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson)
+      } catch {
+        errorDetail = response.statusText || `${response.status}`
+      }
+
+      const isConnectionReset =
+        response.status >= 500 &&
+        /winerror\s*10054|connection.*(?:reset|forcibly closed)/i.test(errorDetail)
+      if (attempt < maxRetries && isConnectionReset) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
+        continue
+      }
+      throw new Error(errorDetail)
+    }
+
+    // If response is empty or 204
+    if (response.status === 204) {
+      return {} as T
+    }
+
+    return response.json()
   }
 
-  // If response is empty or 204
-  if (response.status === 204) {
-    return {} as T
-  }
-
-  return response.json()
+  throw new Error('Request failed after retrying a temporary connection error.')
 }
 
 // =============================================================================
