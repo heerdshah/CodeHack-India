@@ -1,9 +1,9 @@
 'use client'
 
-import { ShieldCheck, MapPin, Navigation } from 'lucide-react'
+import { Filter, MapPin, Navigation, ShieldCheck } from 'lucide-react'
 import Image from 'next/image'
 import { useState } from 'react'
-import { CATEGORIES, formatDate, matchesQuery, type Category, type Resource } from '@/lib/resources'
+import { CATEGORIES, formatDate, formatHourlyRate, matchesQuery, type Category, type Resource } from '@/lib/resources'
 import { SectionHeading, btnGhost, btnPrimary } from './ui'
 
 type Props = {
@@ -24,6 +24,8 @@ export function Catalogue({
   onLocationSort,
 }: Props) {
   const [category, setCategory] = useState<Category | 'All'>('All')
+  const [usePreference, setUsePreference] = useState<'all' | 'independent' | 'assisted'>('all')
+  const [sortOrder, setSortOrder] = useState<'recommended' | 'price-ascending' | 'price-descending'>('recommended')
   const [nearMeActive, setNearMeActive] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(null)
   const [manualCoords, setManualCoords] = useState(false)
@@ -66,9 +68,28 @@ export function Catalogue({
     }
   }
 
-  const list = resources.filter(
-    (r) => (category === 'All' || r.category === category) && matchesQuery(r, query)
-  )
+  const filteredResources = resources.filter((resource) => {
+    const matchesPreference =
+      usePreference === 'all' ||
+      (usePreference === 'assisted'
+        ? Boolean(resource.assistance)
+        : !resource.assistance)
+
+    return (
+      (category === 'All' || resource.category === category) &&
+      matchesQuery(resource, query) &&
+      matchesPreference
+    )
+  })
+  const list = sortOrder === 'recommended'
+    ? filteredResources
+    : [...filteredResources].sort((a, b) => {
+        const aPrice = a.hourlyRate ?? Number.POSITIVE_INFINITY
+        const bPrice = b.hourlyRate ?? Number.POSITIVE_INFINITY
+        if (aPrice === bPrice) return 0
+        const priceDifference = aPrice - bPrice
+        return sortOrder === 'price-ascending' ? priceDifference : -priceDifference
+      })
 
   return (
     <section id="catalogue" aria-labelledby="catalogue-title" className="scroll-mt-28 mx-auto max-w-6xl px-5 py-20 sm:px-6">
@@ -76,7 +97,20 @@ export function Catalogue({
         <SectionHeading index="02" eyebrow="Catalogue" title="Browse what the institution already owns." id="catalogue-title" />
         
         {/* Near Me Sorting Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="relative flex items-center">
+            <Filter className="pointer-events-none absolute left-3 size-4 text-cream" aria-hidden="true" />
+            <span className="sr-only">Sort resources by base price</span>
+            <select
+              value={sortOrder}
+              onChange={(event) => setSortOrder(event.target.value as typeof sortOrder)}
+              className="appearance-none rounded-full border border-white/20 bg-panel py-2 pl-9 pr-3 text-xs text-white outline-none transition hover:border-cream/60 focus:border-cream/60 focus:ring-2 focus:ring-cream/20 [color-scheme:dark]"
+            >
+              <option value="recommended">Recommended order</option>
+              <option value="price-ascending">Price: low to high</option>
+              <option value="price-descending">Price: high to low</option>
+            </select>
+          </label>
           <button
             type="button"
             onClick={toggleNearMe}
@@ -140,6 +174,33 @@ export function Catalogue({
         ))}
       </div>
 
+      <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Filter by assistance preference">
+        <span className="mr-1 text-xs text-stone">Use preference</span>
+        {([
+          ['all', 'Any option'],
+          ['independent', 'Independent use'],
+          ['assisted', 'Assistance available'],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={usePreference === value}
+            onClick={() => setUsePreference(value)}
+            className={`rounded-full px-3.5 py-2 text-xs transition ${
+              usePreference === value
+                ? 'bg-cream text-ink'
+                : 'border border-white/15 text-white/70 hover:border-cream/50 hover:text-white'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <p className="mt-4 text-xs leading-relaxed text-stone">
+        Rates and staff contacts are sample listings for planning only. Confirm final pricing and assistance availability with the facility owner.
+      </p>
+
       {query.trim() && (
         <p className="mt-4 text-sm text-stone" aria-live="polite">
           {list.length} result{list.length === 1 ? '' : 's'} for &ldquo;{query}&rdquo;{' '}
@@ -184,6 +245,30 @@ export function Catalogue({
                   {r.building}{r.floor ? ` (${r.floor})` : ''}
                 </p>
               )}
+
+              <div className="mt-4 rounded-2xl bg-cream/[0.06] p-3 ring-1 ring-cream/10">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-stone">Use price</p>
+                    <p className="mt-1 font-display text-lg font-medium text-cream">
+                      {r.hourlyRate != null ? formatHourlyRate(r.hourlyRate) : 'Contact owner'}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-medium text-white/80">
+                    {r.assistance ? 'Help available' : 'Independent use'}
+                  </span>
+                </div>
+                {r.assistance && (
+                  <div className="mt-3 border-t border-white/10 pt-3">
+                    <p className="text-xs font-medium text-white">
+                      {r.assistance.name} · {r.assistance.qualification}
+                    </p>
+                    <p className="mt-1 text-xs text-stone">
+                      Optional help: +{formatHourlyRate(r.assistance.hourlyRate)} extra
+                    </p>
+                  </div>
+                )}
+              </div>
 
               <div className="mt-4 rounded-2xl bg-white/[0.03] p-3 ring-1 ring-white/5">
                 <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-stone">

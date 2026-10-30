@@ -3,7 +3,7 @@
 import { Search } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
-import { matchesQuery, type Resource } from '@/lib/resources'
+import { formatHourlyRate, matchesQuery, type Resource } from '@/lib/resources'
 
 export function SearchSection({
   resources,
@@ -107,8 +107,15 @@ export function SearchSection({
                             </span>
                           </span>
 
-                          <span className="shrink-0 text-[11px] text-stone">
-                            {resource.category.split(' ')[0]}
+                          <span className="shrink-0 text-right">
+                            <span className="block text-[11px] text-cream">
+                              {resource.hourlyRate != null
+                                ? formatHourlyRate(resource.hourlyRate)
+                                : 'Ask for price'}
+                            </span>
+                            <span className="block text-[10px] text-stone">
+                              {resource.assistance ? 'Help available' : resource.category.split(' ')[0]}
+                            </span>
                           </span>
                         </button>
                       </li>
