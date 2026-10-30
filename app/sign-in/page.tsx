@@ -4,6 +4,10 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AuthModal } from '@/components/resourcx/auth-modal'
 import { SiteNav } from '@/components/resourcx/site-nav'
+import {
+  AUTH_PROFILE_CACHE_KEY,
+  PENDING_AUTH_PROFILE_KEY,
+} from '@/lib/resources'
 
 export default function SignInPage() {
   const router = useRouter()
@@ -23,7 +27,21 @@ export default function SignInPage() {
       </main>
 
       {/* Reuses your existing login + register flow */}
-      <AuthModal open onClose={() => router.push('/')} onRegister={() => router.push('/')} />
+      <AuthModal
+        open
+        onClose={() => router.replace('/')}
+        onRegister={(user) => {
+          try {
+            sessionStorage.setItem(AUTH_PROFILE_CACHE_KEY, JSON.stringify(user))
+            sessionStorage.setItem(PENDING_AUTH_PROFILE_KEY, JSON.stringify(user))
+          } catch (error) {
+            console.error('Unable to preserve the signed-in profile during navigation:', error)
+          }
+          window.dispatchEvent(
+            new CustomEvent('resourcx:auth-changed', { detail: user })
+          )
+        }}
+      />
     </div>
   )
 }

@@ -133,6 +133,32 @@ export type UserProfile = {
   isVerified?: boolean
 }
 
+export const AUTH_PROFILE_CACHE_KEY = 'resourcx:auth-profile'
+export const PENDING_AUTH_PROFILE_KEY = 'resourcx:pending-auth-profile'
+
+export function isUserProfile(value: unknown): value is UserProfile {
+  if (typeof value !== 'object' || value === null) return false
+
+  const profile = value as Record<string, unknown>
+  return (
+    typeof profile.id === 'string' &&
+    typeof profile.email === 'string' &&
+    typeof profile.username === 'string' &&
+    typeof profile.fullName === 'string' &&
+    typeof profile.dob === 'string' &&
+    typeof profile.role === 'string' &&
+    typeof profile.department === 'string' &&
+    Array.isArray(profile.credentials) &&
+    profile.credentials.every((credential) => typeof credential === 'string')
+  )
+}
+
+declare global {
+  interface WindowEventMap {
+    'resourcx:auth-changed': CustomEvent<UserProfile>
+  }
+}
+
 export type BookingStatus = 'pending' | 'waitlisted' | 'rejected' | 'approved' | 'signed' | 'active' | 'returned' | 'completed' | 'cancelled' | 'overdue'
 
 export type InspectionSet = {

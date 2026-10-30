@@ -84,7 +84,6 @@ export default function ChatPage() {
           setNotificationsOpen(true)
           void loadNotifications()
         }}
-        onProfile={() => router.push('/account')}
       />
 
       <main className="mx-auto flex min-h-screen max-w-7xl items-center px-4 pb-6 pt-20 sm:px-6">

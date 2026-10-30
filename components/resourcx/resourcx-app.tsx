@@ -10,9 +10,12 @@ import {
   type Resource,
   type UserProfile,
   type WaitlistEntry,
+  AUTH_PROFILE_CACHE_KEY,
+  PENDING_AUTH_PROFILE_KEY,
+  isUserProfile,
 } from '@/lib/resources'
 
-import { api, type NotificationItem } from '@/lib/api'
+import { api, ApiError, type NotificationItem } from '@/lib/api'
 
 import { About } from './about'
 import { AdminModal } from './admin-modal'
@@ -46,6 +49,7 @@ export function ResourcXApp() {
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([])
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [loginNotice, setLoginNotice] = useState('')
 
   // Modals state
   const [adminOpen, setAdminOpen] = useState(false)
@@ -63,45 +67,98 @@ export function ResourcXApp() {
     lat?: number | null,
     lng?: number | null
   ) => {
-    try {
-      const [fetchedResources, fetchedBookings] = await Promise.all([
-        api.resources.list({ lat, lng }),
-        api.bookings.list().catch(() => []),
-      ])
+    const loadResourcesAndBookings = async () => {
+      try {
+        const [fetchedResources, fetchedBookings] = await Promise.all([
+          api.resources.list({ lat, lng }),
+          api.bookings.list().catch(() => []),
+        ])
 
-      setResources(fetchedResources)
-      setBookings(fetchedBookings)
+        setResources(fetchedResources)
+        setBookings(fetchedBookings)
+      } catch (err) {
+        console.error('Error loading initial ResourcX data:', err)
+      }
+    }
 
-      // Fetch the current user session
+    const loadCurrentUser = async () => {
       try {
         const me = await api.auth.getMe()
-
-        if (me) {
-          setUser(me)
-
-          const myNotifs = await api.notifications
-            .list()
-            .catch(() => [])
-
-          setNotifications(myNotifs)
-        } else {
+        setUser(me)
+        try {
+          sessionStorage.setItem(AUTH_PROFILE_CACHE_KEY, JSON.stringify(me))
+        } catch (error) {
+          console.error('Unable to cache the authenticated profile:', error)
+        }
+        setNotifications(
+          me ? await api.notifications.list().catch(() => []) : []
+        )
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          try {
+            sessionStorage.removeItem(AUTH_PROFILE_CACHE_KEY)
+          } catch (storageError) {
+            console.error('Unable to clear the expired profile cache:', storageError)
+          }
           setUser(null)
           setNotifications([])
+        } else {
+          console.error('Unable to refresh the current user session:', error)
         }
-      } catch {
-        // The visitor is not authenticated.
-        setUser(null)
-        setNotifications([])
       }
-    } catch (err) {
-      console.error('Error loading initial ResourcX data:', err)
+    }
+
+    try {
+      await Promise.all([loadResourcesAndBookings(), loadCurrentUser()])
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
+    let noticeTimeout: number | undefined
+    try {
+      const pendingProfile = sessionStorage.getItem(PENDING_AUTH_PROFILE_KEY)
+      const cachedProfile = sessionStorage.getItem(AUTH_PROFILE_CACHE_KEY)
+      if (pendingProfile) {
+        sessionStorage.removeItem(PENDING_AUTH_PROFILE_KEY)
+      }
+      if (cachedProfile || pendingProfile) {
+        const parsedProfile: unknown = JSON.parse(cachedProfile || pendingProfile || '')
+        if (isUserProfile(parsedProfile)) {
+          setUser(parsedProfile)
+          if (pendingProfile) {
+            setLoginNotice(`Signed in successfully. Welcome back, ${parsedProfile.fullName}.`)
+            noticeTimeout = window.setTimeout(() => setLoginNotice(''), 5000)
+          }
+        } else {
+          sessionStorage.removeItem(AUTH_PROFILE_CACHE_KEY)
+          console.error('The saved sign-in profile is invalid.')
+        }
+      }
+    } catch (error) {
+      console.error('Unable to restore the signed-in profile:', error)
+    }
+
     void loadAppData()
+    return () => {
+      if (noticeTimeout !== undefined) window.clearTimeout(noticeTimeout)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleAuthChange = (event: WindowEventMap['resourcx:auth-changed']) => {
+      setUser(event.detail)
+      try {
+        sessionStorage.setItem(AUTH_PROFILE_CACHE_KEY, JSON.stringify(event.detail))
+      } catch (error) {
+        console.error('Unable to cache the authenticated profile:', error)
+      }
+      void loadAppData()
+    }
+
+    window.addEventListener('resourcx:auth-changed', handleAuthChange)
+    return () => window.removeEventListener('resourcx:auth-changed', handleAuthChange)
   }, [])
 
   useEffect(() => {
@@ -291,8 +348,17 @@ export function ResourcXApp() {
             })
         }}
         onOpenAdmin={() => setAdminOpen(true)}
-        onProfile={() => router.push('/account')}
       />
+
+      {loginNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed left-1/2 top-20 z-[60] -translate-x-1/2 rounded-lg border border-cream/30 bg-ink px-5 py-3 text-sm text-cream shadow-xl"
+        >
+          {loginNotice}
+        </div>
+      )}
 
       <main>
         <Hero />

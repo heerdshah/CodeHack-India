@@ -4,6 +4,7 @@
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES 
     ('verification-docs', 'verification-docs', FALSE, 10485760, ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
+    ('booking-proofs', 'booking-proofs', FALSE, 10485760, ARRAY['application/pdf']),
     ('inspection-photos', 'inspection-photos', FALSE, 15728640, ARRAY['image/jpeg', 'image/png', 'image/webp']),
     ('incident-photos', 'incident-photos', FALSE, 15728640, ARRAY['image/jpeg', 'image/png', 'image/webp']),
     ('agreements', 'agreements', FALSE, 10485760, ARRAY['application/pdf', 'image/png'])
@@ -43,4 +44,3 @@ DO $$ BEGIN
     ON storage.objects FOR ALL TO service_role
     USING (true) WITH CHECK (true);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-

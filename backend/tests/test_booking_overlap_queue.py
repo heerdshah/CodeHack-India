@@ -159,6 +159,55 @@ def test_booking_submission_notifies_applicant_and_owner(user_client, mira_clien
     assert approved_notification["title"] == "Booking Approved!"
 
 
+def test_rejected_booking_notifies_applicant_with_owner_reason(
+    user_client, mira_client
+):
+    booking = user_client.post("/bookings", json={
+        "resource_id": "cnc-5axis",
+        "start_date": "2027-04-23T09:00:00Z",
+        "end_date": "2027-04-23T17:00:00Z",
+        "purpose": "Rejection notification test",
+    })
+    assert booking.status_code == 200, booking.text
+    booking_id = booking.json()["id"]
+    reason = "The lab is undergoing maintenance during those dates."
+
+    rejected = mira_client.patch(
+        f"/bookings/{booking_id}/status",
+        json={"status": "rejected", "rejection_reason": reason},
+    )
+    assert rejected.status_code == 200, rejected.text
+
+    notifications = user_client.get("/notifications")
+    assert notifications.status_code == 200, notifications.text
+    rejection = next(
+        item
+        for item in notifications.json()
+        if item.get("data", {}).get("booking_id") == booking_id
+        and item.get("type") == "booking_rejected"
+    )
+    assert rejection["title"] == "Booking Request Declined"
+    assert reason in rejection["message"]
+    assert rejected.json()["rejection_reason"] == reason
+
+
+def test_rejecting_booking_requires_a_reason(user_client, mira_client):
+    booking = user_client.post("/bookings", json={
+        "resource_id": "cnc-5axis",
+        "start_date": "2027-04-24T09:00:00Z",
+        "end_date": "2027-04-24T17:00:00Z",
+        "purpose": "Missing rejection reason test",
+    })
+    assert booking.status_code == 200, booking.text
+
+    rejected = mira_client.patch(
+        f"/bookings/{booking.json()['id']}/status",
+        json={"status": "rejected", "rejection_reason": "   "},
+    )
+    assert rejected.status_code == 400
+    assert "reason is required" in rejected.json()["detail"].lower()
+
+
 def test_supabase_proof_is_returned_as_inline_pdf(
     user_client, mira_client, monkeypatch
 ):
@@ -196,6 +245,36 @@ def test_supabase_proof_is_returned_as_inline_pdf(
     assert proof.headers["content-type"] == "application/pdf"
     assert proof.headers["content-disposition"].startswith("inline;")
     assert proof.content == b"%PDF-1.7 stored proof"
+
+
+def test_owner_can_open_legacy_verification_storage_proof(
+    user_client, mira_client, monkeypatch, tmp_path
+):
+    """Proofs saved by the earlier verification-docs flow remain readable."""
+    monkeypatch.chdir(tmp_path)
+    legacy_path = "verification-docs/legacy-proof.pdf"
+    proof_file = tmp_path / "uploads" / "verification-docs" / legacy_path
+    proof_file.parent.mkdir(parents=True)
+    proof_file.write_bytes(b"%PDF-1.4 legacy safety proof")
+
+    booking = user_client.post("/bookings", json={
+        "resource_id": "cnc-5axis",
+        "start_date": "2027-04-23T09:00:00Z",
+        "end_date": "2027-04-23T17:00:00Z",
+        "purpose": "Legacy proof compatibility test",
+    })
+    assert booking.status_code == 200, booking.text
+
+    from app.repositories.booking_repo import booking_repo
+    stored = booking_repo._memory_bookings[booking.json()["id"]]
+    stored["proof_files"] = [legacy_path]
+
+    proof = mira_client.get(f"/bookings/{booking.json()['id']}/proofs/0")
+
+    assert proof.status_code == 200, proof.text
+    assert proof.headers["content-type"] == "application/pdf"
+    assert proof.headers["content-disposition"].startswith("inline;")
+    assert proof.content == b"%PDF-1.4 legacy safety proof"
 
 
 def test_legacy_filename_only_proof_returns_actionable_error(

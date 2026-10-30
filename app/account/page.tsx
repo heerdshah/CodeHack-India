@@ -14,10 +14,17 @@ import {
   Settings,
   ShieldCheck,
   UserRound,
+  XCircle,
 } from 'lucide-react'
 
-import { api } from '@/lib/api'
-import type { Booking, Resource, UserProfile } from '@/lib/resources'
+import { api, ApiError } from '@/lib/api'
+import {
+  AUTH_PROFILE_CACHE_KEY,
+  type Booking,
+  type Resource,
+  type UserProfile,
+  isUserProfile,
+} from '@/lib/resources'
 
 import { AgreementModal } from '@/components/resourcx/agreement-modal'
 import { AccessPass, InspectionModal } from '@/components/resourcx/inspection-modal'
@@ -82,8 +89,12 @@ export default function AccountPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [resources, setResources] = useState<Resource[]>([])
   const [loading, setLoading] = useState(true)
+  const [accountDataLoading, setAccountDataLoading] = useState(true)
   const [signingOut, setSigningOut] = useState(false)
   const [approvingBooking, setApprovingBooking] = useState<string | null>(null)
+  const [rejectionBooking, setRejectionBooking] = useState<Booking | null>(null)
+  const [rejectionReason, setRejectionReason] = useState('')
+  const [rejectingBooking, setRejectingBooking] = useState(false)
   const [checkingInBooking, setCheckingInBooking] = useState<string | null>(null)
   const [noDamageConfirmationOpen, setNoDamageConfirmationOpen] = useState(false)
   const [openingProof, setOpeningProof] = useState<string | null>(null)
@@ -104,35 +115,67 @@ export default function AccountPage() {
   const [bookingNotifications, setBookingNotifications] = useState(true)
 
   const loadAccount = useCallback(async () => {
-    setLoading(true)
     setError('')
 
+    let cachedUser: UserProfile | null = null
     try {
-      const currentUser = await api.auth.getMe()
-
-      if (!currentUser) {
-        router.replace('/sign-in')
-        return
+      const cachedProfile = sessionStorage.getItem(AUTH_PROFILE_CACHE_KEY)
+      if (cachedProfile) {
+        const parsedProfile: unknown = JSON.parse(cachedProfile)
+        if (isUserProfile(parsedProfile)) {
+          cachedUser = parsedProfile
+          setUser(parsedProfile)
+          setLoading(false)
+        } else {
+          sessionStorage.removeItem(AUTH_PROFILE_CACHE_KEY)
+          console.error('The cached account profile is invalid.')
+        }
       }
+    } catch (cacheError) {
+      console.error('Unable to read the cached account profile:', cacheError)
+    }
 
-      setUser(currentUser)
+    setAccountDataLoading(true)
+    if (!cachedUser) setLoading(true)
 
-      const [allBookings, allResources] = await Promise.all([
+    try {
+      const [currentUser, allBookings, allResources] = await Promise.all([
+        api.auth.getMe(),
         api.bookings.list(),
         api.resources.list(),
       ])
 
+      try {
+        sessionStorage.setItem(AUTH_PROFILE_CACHE_KEY, JSON.stringify(currentUser))
+      } catch (cacheError) {
+        console.error('Unable to cache the authenticated profile:', cacheError)
+      }
+
+      setUser(currentUser)
       setBookings(allBookings)
       setResources(allResources)
     } catch (err: unknown) {
       console.error('Failed to load account:', err)
 
+      if (err instanceof ApiError && err.status === 401) {
+        try {
+          sessionStorage.removeItem(AUTH_PROFILE_CACHE_KEY)
+        } catch (cacheError) {
+          console.error('Unable to clear the expired profile cache:', cacheError)
+        }
+        setUser(null)
+        router.replace('/sign-in')
+      }
+
       setError(
         err instanceof Error
-          ? err.message
+          ? cachedUser
+            ? `Unable to refresh your account data: ${err.message}`
+            : err.message
           : 'Unable to load your account. Please try again.'
       )
     } finally {
+      setAccountDataLoading(false)
       setLoading(false)
     }
   }, [router])
@@ -244,6 +287,30 @@ export default function AccountPage() {
     }
   }
 
+  const rejectBooking = async () => {
+    if (!rejectionBooking) return
+
+    const reason = rejectionReason.trim()
+    if (!reason) return
+
+    setRejectingBooking(true)
+    setRequestsError('')
+    try {
+      await api.bookings.updateStatus(rejectionBooking.id, 'rejected', reason)
+      setBookings(await api.bookings.list())
+      setRejectionBooking(null)
+      setRejectionReason('')
+    } catch (err: unknown) {
+      setRequestsError(
+        err instanceof Error
+          ? `Unable to decline booking: ${err.message}`
+          : 'Unable to decline booking. Please try again.'
+      )
+    } finally {
+      setRejectingBooking(false)
+    }
+  }
+
   const viewProof = async (bookingId: string, index: number, isApplicant: boolean) => {
     const proofKey = `${bookingId}:${index}`
     setOpeningProof(proofKey)
@@ -329,6 +396,11 @@ export default function AccountPage() {
 
     try {
       await api.auth.logout()
+      try {
+        sessionStorage.removeItem(AUTH_PROFILE_CACHE_KEY)
+      } catch (cacheError) {
+        console.error('Unable to clear the signed-out profile cache:', cacheError)
+      }
       router.replace('/sign-in')
       router.refresh()
     } catch (err: unknown) {
@@ -431,6 +503,12 @@ export default function AccountPage() {
           </div>
         )}
 
+        {accountDataLoading && (
+          <p role="status" aria-live="polite" className="mt-4 text-sm text-stone">
+            Refreshing your bookings and resources…
+          </p>
+        )}
+
         {/* Profile */}
         <section
           aria-labelledby="profile-heading"
@@ -506,7 +584,7 @@ export default function AccountPage() {
             </div>
 
             <p className="mt-4 font-display text-4xl">
-              {myBookings.length}
+              {accountDataLoading ? '…' : myBookings.length}
             </p>
           </div>
 
@@ -519,7 +597,7 @@ export default function AccountPage() {
             </div>
 
             <p className="mt-4 font-display text-4xl">
-              {activeBookings.length}
+              {accountDataLoading ? '…' : activeBookings.length}
             </p>
           </div>
 
@@ -552,8 +630,9 @@ export default function AccountPage() {
                 </h2>
               </div>
               <span className="text-xs text-stone">
-                {activeManagedBookings.length} active request
-                {activeManagedBookings.length === 1 ? '' : 's'}
+                {accountDataLoading
+                  ? 'Loading requests…'
+                  : `${activeManagedBookings.length} active request${activeManagedBookings.length === 1 ? '' : 's'}`}
               </span>
             </div>
 
@@ -568,7 +647,11 @@ export default function AccountPage() {
 
             {activeManagedBookings.length === 0 ? (
               <div className="mt-6 rounded-3xl border border-dashed border-white/15 px-6 py-10 text-center">
-                <p className="text-sm text-stone">No active requests for your resources.</p>
+                <p className="text-sm text-stone">
+                  {accountDataLoading
+                    ? 'Loading requests for your resources…'
+                    : 'No active requests for your resources.'}
+                </p>
               </div>
             ) : (
               <div className="mt-6 grid gap-4">
@@ -619,10 +702,10 @@ export default function AccountPage() {
                       </p>
                     )}
 
-                    {booking.proofFiles.some((proof) => proof.startsWith('local:') || proof.startsWith('supabase:')) && (
+                    {booking.proofFiles.length > 0 && (
                       <div className="mt-4 flex flex-wrap gap-2">
                         {booking.proofFiles.map((proof, index) => ({ proof, index }))
-                          .filter(({ proof }) => proof.startsWith('local:') || proof.startsWith('supabase:'))
+                          .filter(({ proof }) => proof.trim().length > 0)
                           .map(({ proof, index }) => (
                           <button
                             key={`${proof}-${index}`}
@@ -639,11 +722,23 @@ export default function AccountPage() {
                     )}
 
                     {booking.status === 'pending' && (
-                      <div className="mt-5 flex justify-end">
+                      <div className="mt-5 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRejectionBooking(booking)
+                            setRejectionReason('')
+                          }}
+                          disabled={approvingBooking !== null || rejectingBooking}
+                          className="inline-flex items-center gap-2 rounded-full border border-red-300/30 px-4 py-2 text-sm font-medium text-red-200 transition hover:border-red-300/60 hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <XCircle className="size-4" aria-hidden="true" />
+                          Decline request
+                        </button>
                         <button
                           type="button"
                           onClick={() => void approveBooking(booking.id)}
-                          disabled={approvingBooking !== null}
+                          disabled={approvingBooking !== null || rejectingBooking}
                           className="inline-flex items-center gap-2 rounded-full bg-cream px-4 py-2 text-sm font-medium text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Check className="size-4" aria-hidden="true" />
@@ -685,7 +780,9 @@ export default function AccountPage() {
             {managedBookingHistory.length === 0 ? (
               <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.025] px-5 py-8">
                 <p className="text-sm text-stone">
-                  Approved, used, and closed bookings for your resources will appear here.
+                  {accountDataLoading
+                    ? 'Loading booking history…'
+                    : 'Approved, used, and closed bookings for your resources will appear here.'}
                 </p>
               </div>
             ) : (
@@ -710,6 +807,24 @@ export default function AccountPage() {
                           <p className="mt-2 text-xs text-stone">
                             Owner review: {booking.post.ownerDecision === 'damage' ? 'Damage reported' : 'No damage reported'}.
                           </p>
+                        )}
+                        {booking.proofFiles.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {booking.proofFiles.map((proof, index) => ({ proof, index }))
+                              .filter(({ proof }) => proof.trim().length > 0)
+                              .map(({ proof, index }) => (
+                                <button
+                                  key={`${proof}-${index}`}
+                                  type="button"
+                                  onClick={() => void viewProof(booking.id, index, false)}
+                                  disabled={openingProof !== null}
+                                  className="inline-flex items-center gap-2 rounded-full border border-white/15 px-3 py-1.5 text-xs text-cream transition hover:border-cream/50 disabled:opacity-50"
+                                >
+                                  <ExternalLink className="size-3.5" aria-hidden="true" />
+                                  {openingProof === `${booking.id}:${index}` ? 'Opening PDF…' : `View uploaded PDF ${index + 1}`}
+                                </button>
+                              ))}
+                          </div>
                         )}
                       </div>
                       <StatusBadge status={booking.status} />
@@ -741,8 +856,9 @@ export default function AccountPage() {
             </div>
 
             <span className="text-xs text-stone">
-              {activeBookings.length} booking
-              {activeBookings.length === 1 ? '' : 's'}
+              {accountDataLoading
+                ? 'Loading…'
+                : `${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'}`}
             </span>
           </div>
 
@@ -757,26 +873,34 @@ export default function AccountPage() {
 
           {activeBookings.length === 0 ? (
             <div className="mt-6 rounded-3xl border border-dashed border-white/15 px-6 py-12 text-center">
-              <CalendarDays
-                className="mx-auto size-7 text-stone"
-                aria-hidden="true"
-              />
+              {accountDataLoading ? (
+                <p role="status" className="text-sm text-stone">
+                  Loading your bookings…
+                </p>
+              ) : (
+                <>
+                  <CalendarDays
+                    className="mx-auto size-7 text-stone"
+                    aria-hidden="true"
+                  />
 
-              <h3 className="mt-4 text-lg font-medium">
-                Nothing booked right now
-              </h3>
+                  <h3 className="mt-4 text-lg font-medium">
+                    Nothing booked right now
+                  </h3>
 
-              <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-stone">
-                When you request a shared space or a piece of equipment,
-                your booking activity will appear here.
-              </p>
+                  <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-stone">
+                    When you request a shared space or a piece of equipment,
+                    your booking activity will appear here.
+                  </p>
 
-              <Link
-                href="/explore"
-                className="mt-5 inline-flex rounded-full bg-cream px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-white"
-              >
-                Explore the catalog
-              </Link>
+                  <Link
+                    href="/explore"
+                    className="mt-5 inline-flex rounded-full bg-cream px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-white"
+                  >
+                    Explore the catalog
+                  </Link>
+                </>
+              )}
             </div>
           ) : (
             <div className="mt-6 grid gap-4">
@@ -818,10 +942,10 @@ export default function AccountPage() {
                     </p>
                   )}
 
-                  {booking.proofFiles.some((proof) => proof.startsWith('local:') || proof.startsWith('supabase:')) && (
+                  {booking.proofFiles.length > 0 && (
                     <div className="mt-4 flex flex-wrap gap-2">
                       {booking.proofFiles.map((proof, index) => ({ proof, index }))
-                        .filter(({ proof }) => proof.startsWith('local:') || proof.startsWith('supabase:'))
+                        .filter(({ proof }) => proof.trim().length > 0)
                         .map(({ proof, index }) => (
                           <button
                             key={`${proof}-${index}`}
@@ -962,7 +1086,9 @@ export default function AccountPage() {
           {bookingHistory.length === 0 ? (
             <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.025] px-5 py-8">
               <p className="text-sm text-stone">
-                Your approved, used, returned, completed, rejected, and cancelled bookings will appear here.
+                {accountDataLoading
+                  ? 'Loading booking history…'
+                  : 'Your approved, used, returned, completed, rejected, and cancelled bookings will appear here.'}
               </p>
             </div>
           ) : (
@@ -1082,6 +1208,71 @@ export default function AccountPage() {
           </p>
         </section>
       </main>
+
+      <Modal
+        open={rejectionBooking !== null}
+        onClose={() => {
+          if (rejectingBooking) return
+          setRejectionBooking(null)
+          setRejectionReason('')
+        }}
+        eyebrow="Booking decision"
+        title="Decline booking request"
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void rejectBooking()
+          }}
+        >
+          <p className="text-sm text-white/70">
+            Give {rejectionBooking?.applicant.name ?? 'the applicant'} a reason for declining this request. They will receive it in their notifications.
+          </p>
+          {requestsError && (
+            <p role="alert" className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200">
+              {requestsError}
+            </p>
+          )}
+          <div>
+            <label htmlFor="booking-rejection-reason" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-stone">
+              Reason for declining
+            </label>
+            <textarea
+              id="booking-rejection-reason"
+              required
+              autoFocus
+              rows={4}
+              maxLength={1000}
+              value={rejectionReason}
+              onChange={(event) => setRejectionReason(event.target.value)}
+              placeholder="Explain why this booking cannot be approved."
+              disabled={rejectingBooking}
+              className="w-full resize-y rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-white placeholder:text-stone outline-none transition focus:border-cream/60 focus:ring-2 focus:ring-cream/20 disabled:opacity-50"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setRejectionBooking(null)
+                setRejectionReason('')
+              }}
+              disabled={rejectingBooking}
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 px-5 py-2.5 text-sm font-medium text-white transition hover:border-white/40 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={rejectingBooking || !rejectionReason.trim()}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-red-500 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {rejectingBooking ? 'Submitting…' : 'Submit decline'}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <AgreementModal
         booking={agreementBooking}

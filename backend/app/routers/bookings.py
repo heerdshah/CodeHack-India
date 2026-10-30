@@ -3,6 +3,7 @@ import os
 import uuid
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.responses import FileResponse, Response
@@ -49,6 +50,39 @@ def inspection_summary(booking_id: str, phase: str, inspection: Optional[Dict[st
             if photo.get("angle") in INSPECTION_ANGLES
         },
     }
+
+
+def parse_legacy_proof_reference(storage_ref: str) -> Optional[tuple[str, str]]:
+    bucket = None
+    object_path = None
+
+    if storage_ref.startswith("verification-docs/"):
+        bucket = "verification-docs"
+        object_path = storage_ref
+    elif storage_ref.startswith(("http://", "https://", "/")):
+        path_parts = [part for part in unquote(urlsplit(storage_ref).path).split("/") if part]
+        if len(path_parts) >= 3 and path_parts[0] == "storage":
+            bucket = path_parts[1]
+            object_path = "/".join(path_parts[2:])
+        elif (
+            len(path_parts) >= 6
+            and path_parts[:3] == ["storage", "v1", "object"]
+            and path_parts[3] in {"sign", "public"}
+        ):
+            bucket = path_parts[4]
+            object_path = "/".join(path_parts[5:])
+
+    if bucket != "verification-docs" or not object_path:
+        return None
+
+    parts = object_path.split("/")
+    if (
+        Path(parts[-1]).suffix.lower() != ".pdf"
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        return None
+
+    return bucket, object_path
 
 
 async def store_booking_proof(file: UploadFile, user_id: str) -> str:
@@ -149,39 +183,68 @@ async def view_booking_proof(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking proof not found.")
 
     storage_ref = proof_files[proof_index]
-    if not isinstance(storage_ref, str) or ":" not in storage_ref:
+    if not isinstance(storage_ref, str):
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="This request was submitted before PDF files were stored. Ask the applicant to attach the PDF from their account.",
         )
 
-    storage_type, path = storage_ref.split(":", 1)
-    if (
-        not path.startswith(f"{booking['user_id']}/")
-        or any(part in {"", ".", ".."} for part in path.split("/"))
-    ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking proof is unavailable.")
+    if storage_ref.startswith(("local:", "supabase:")):
+        storage_type, path = storage_ref.split(":", 1)
+        bucket = PROOF_BUCKET
+        if (
+            not path.startswith(f"{booking['user_id']}/")
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+        ):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking proof is unavailable.")
+    else:
+        legacy_reference = parse_legacy_proof_reference(storage_ref)
+        if legacy_reference is None:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="This request was submitted before PDF files were stored. Ask the applicant to attach the PDF from their account.",
+            )
+        bucket, path = legacy_reference
+        storage_type = "legacy"
+
     path_parts = Path(*path.split("/"))
-    if storage_type == "local":
-        storage_root = (Path.cwd() / "uploads" / PROOF_BUCKET).resolve()
-        file_path = (storage_root / path_parts).resolve()
-        if storage_root not in file_path.parents or not file_path.is_file():
+    local_file_path = None
+    if storage_type in {"local", "legacy"}:
+        storage_root = (Path.cwd() / "uploads" / bucket).resolve()
+        local_file_path = (storage_root / path_parts).resolve()
+        if storage_root not in local_file_path.parents:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking proof is unavailable.")
+
+    if storage_type == "local" or (
+        storage_type == "legacy"
+        and local_file_path is not None
+        and local_file_path.is_file()
+    ):
+        if local_file_path is None or not local_file_path.is_file():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking proof file not found.")
+        with local_file_path.open("rb") as proof_file:
+            if not proof_file.read(5).startswith(b"%PDF-"):
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The stored booking proof is not a valid PDF.")
         return FileResponse(
-            file_path,
+            local_file_path,
             media_type="application/pdf",
-            filename=file_path.name,
+            filename=local_file_path.name,
             content_disposition_type="inline",
         )
 
-    if storage_type != "supabase":
+    if storage_type == "legacy" and (
+        os.environ.get("TESTING") == "1" or not check_supabase_configured()
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking proof file not found.")
+
+    if storage_type not in {"supabase", "legacy"}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking proof is unavailable.")
 
     client = get_supabase_admin()
     if client is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Document storage is unavailable.")
     try:
-        pdf_bytes = client.storage.from_(PROOF_BUCKET).download(path)
+        pdf_bytes = client.storage.from_(bucket).download(path)
     except Exception as exc:
         logger.exception("Unable to download booking proof %s", booking_id)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to retrieve the uploaded PDF.") from exc
@@ -292,6 +355,11 @@ async def update_status(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Signed and active booking states are set only by the agreement and check-in flows.",
+        )
+    if req.status == "rejected" and not (req.rejection_reason or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A reason is required when declining a booking request.",
         )
 
     resource = await resource_repo.get_by_id(booking["resource_id"])

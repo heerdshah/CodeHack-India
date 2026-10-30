@@ -36,6 +36,7 @@ export function AuthModal({
   
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loginTakingLong, setLoginTakingLong] = useState(false)
 
   const setReg = <K extends keyof typeof EMPTY_REG>(k: K, v: (typeof EMPTY_REG)[K]) =>
     setForm((f) => ({ ...f, [k]: v }))
@@ -44,6 +45,8 @@ export function AuthModal({
     e.preventDefault()
     setError('')
     setLoading(true)
+    setLoginTakingLong(false)
+    const progressTimer = window.setTimeout(() => setLoginTakingLong(true), 5000)
     try {
       const user = await api.auth.login({
         identifier: loginIdentifier,
@@ -54,6 +57,8 @@ export function AuthModal({
     } catch (err: any) {
       setError(err.message || 'Login failed')
     } finally {
+      window.clearTimeout(progressTimer)
+      setLoginTakingLong(false)
       setLoading(false)
     }
   }
@@ -170,7 +175,7 @@ export function AuthModal({
             </div>
           </div>
 
-          <form onSubmit={handleLoginSubmit} className="grid gap-4">
+          <form onSubmit={handleLoginSubmit} className="grid gap-4" aria-busy={loading}>
             <div>
               <label htmlFor="login-id" className={labelCls}>Username or Email</label>
               <input
@@ -199,11 +204,24 @@ export function AuthModal({
             {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
 
             <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-              <button type="button" onClick={onClose} className={btnGhost}>Cancel</button>
+              <button type="button" onClick={onClose} disabled={loading} className={btnGhost}>Cancel</button>
               <button type="submit" disabled={loading} className={btnPrimary}>
-                {loading ? 'Signing in...' : 'Sign In'}
+                {loading && (
+                  <span
+                    aria-hidden="true"
+                    className="mr-2 inline-block size-4 animate-spin rounded-full border-2 border-current border-r-transparent align-[-3px]"
+                  />
+                )}
+                {loading ? 'Signing in…' : 'Sign In'}
               </button>
             </div>
+            {loading && (
+              <p role="status" aria-live="polite" className="text-sm text-white/70">
+                {loginTakingLong
+                  ? 'We’re still waiting for the server to confirm your account. Please keep this page open.'
+                  : 'Verifying your credentials. This can take a few seconds; your account will open automatically.'}
+              </p>
+            )}
           </form>
         </div>
       ) : (

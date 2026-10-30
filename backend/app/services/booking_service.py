@@ -187,6 +187,7 @@ class BookingService:
 
         updates: Dict[str, Any] = {"status": new_status}
         if rejection_reason:
+            rejection_reason = rejection_reason.strip()
             updates["rejection_reason"] = rejection_reason
 
         # If approved, generate institutional agreement
@@ -220,6 +221,17 @@ class BookingService:
                 pass
 
         updated = await booking_repo.update(booking_id, updates)
+
+        if new_status == "rejected":
+            resource = await resource_repo.get_by_id(booking["resource_id"])
+            resource_name = resource.get("name", "resource") if resource else "resource"
+            await notification_repo.create({
+                "user_id": booking["user_id"],
+                "type": "booking_rejected",
+                "title": "Booking Request Declined",
+                "message": f"Your booking request for {resource_name} was declined. Reason: {rejection_reason}",
+                "data": {"booking_id": booking["id"]},
+            })
 
         # Audit log
         try:

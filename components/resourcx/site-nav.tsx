@@ -14,7 +14,6 @@ type Props = {
   unreadCount?: number
   onToggleNotifications?: () => void
   onOpenAdmin?: () => void
-  onProfile?: () => void
 }
 
 const LINKS = [
@@ -32,7 +31,6 @@ export function SiteNav({
   unreadCount = 0,
   onToggleNotifications,
   onOpenAdmin,
-  onProfile,
 }: Props) {
   const [localNotifications, setLocalNotifications] = useState<NotificationItem[]>([])
   const [notificationsOpen, setNotificationsOpen] = useState(false)
@@ -176,7 +174,6 @@ export function SiteNav({
             {user ? (
               <Link
                 href="/account"
-                onClick={onProfile}
                 aria-label={`Open account for ${user.fullName}`}
                 title="My account"
                 className="grid size-9 place-items-center rounded-full border border-white/15 bg-black/30 text-xs font-semibold text-white transition hover:border-cream/60"

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Response, Request, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status, Response, Request, Depends
 from typing import Dict, Any
 from datetime import datetime, timezone
 
@@ -96,7 +96,12 @@ async def register(req: RegisterRequest, response: Response, request: Request):
     )
 
 @router.post("/login", response_model=UserProfileResponse)
-async def login(req: LoginRequest, response: Response, request: Request):
+async def login(
+    req: LoginRequest,
+    response: Response,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     client_ip = request.client.host if request.client else "127.0.0.1"
     check_login_rate_limit(client_ip)
 
@@ -132,13 +137,14 @@ async def login(req: LoginRequest, response: Response, request: Request):
     approved_creds = [c["credential_name"] for c in user_creds if c.get("status") == "approved"]
 
     # Audit log
-    await audit_repo.log(
+    background_tasks.add_task(
+        audit_repo.log,
         actor_id=user["id"],
         actor_role=user.get("system_role", "user"),
         action="user.login",
         entity_type="user",
         entity_id=user["id"],
-        ip_address=client_ip
+        ip_address=client_ip,
     )
 
     return UserProfileResponse(
@@ -186,4 +192,3 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         is_verified=current_user.get("is_verified", False),
         credentials=approved_creds
     )
-

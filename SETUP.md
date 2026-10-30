@@ -51,7 +51,8 @@ This guide contains the exact steps to configure, seed, and launch the ResourcX 
    - If migrations `001`–`011` have already been applied to an existing project, run only `012_direct_username_chat.sql` to enable username-started direct conversations.
 
 4. **Verify Storage Buckets**:
-   - Go to **Storage** in Supabase: verify that `verification-docs`, `inspection-photos`, `incident-photos`, and `agreements` are present and marked Private.
+   - Go to **Storage** in Supabase: verify that `verification-docs`, `booking-proofs`, `inspection-photos`, `incident-photos`, and `agreements` are present and marked Private.
+   - For an existing project, run the updated `backend/migrations/storage.sql` in the SQL Editor to add the private `booking-proofs` bucket required for booking attachments.
 
 ---
 

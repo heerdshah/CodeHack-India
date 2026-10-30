@@ -5,12 +5,14 @@
 
 import { resourcePricingFor, type ResourceAssistance } from './resources'
 
-const normalizeLocalHost = (value: string): string => {
-  const normalized = value.trim()
-  return normalized.replace(/^(https?:)\/\/localhost(?=[:/]|$)/i, '$1://127.0.0.1')
-}
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL?.trim() || 'http://localhost:8000'
 
-export const API_BASE = normalizeLocalHost(process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000')
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
@@ -58,7 +60,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       errorDetail = response.statusText || `${response.status}`
     }
 
-    throw new Error(errorDetail)
+    throw new ApiError(errorDetail, response.status)
   }
 
   if (response.status === 204) {
