@@ -28,16 +28,14 @@ class Settings(BaseSettings):
     GROQ_TEXT_MODEL: str = "llama-3.3-70b-versatile"
     
     # CORS
-   FRONTEND_ORIGIN: str = "https://resourcx-main-heerdshah83-5681s-projects.vercel.app"
+    FRONTEND_ORIGIN: str = "https://resourcx-main-heerdshah83-5681s-projects.vercel.app"
 
-ALLOWED_ORIGINS: List[str] = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://resourcx-main-heerdshah83-5681s-projects.vercel.app",
-    "https://resourcx-main.vercel.app",
-    "https://resourcx-heerdshah83-5681s-projects.vercel.app",
-    "https://*.vercel.app"  # Wildcard for all subdomains
-] 
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://resourcx-main-heerdshah83-5681s-projects.vercel.app",
+        "https://*.vercel.app"
+    ]
     # Email / Notifications
     SMTP_HOST: Optional[str] = None
     SMTP_PORT: int = 587
