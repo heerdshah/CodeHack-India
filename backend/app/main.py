@@ -78,9 +78,17 @@ async def health_check():
     }
 
 # Wrap the complete ASGI app so CORS headers are also present on unhandled errors.
+# Include both localhost and loopback origins because Windows/browser resolution can prefer
+# ::1 or 127.0.0.1 even when the app is configured for the other address.
 app = CORSMiddleware(
     app=app,
-    allow_origins=[settings.FRONTEND_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        settings.FRONTEND_ORIGIN,
+        *settings.ALLOWED_ORIGINS,
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://[::1]:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

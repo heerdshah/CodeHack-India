@@ -3,7 +3,7 @@
 import { AlertTriangle, Check, Clock, ShieldCheck, X } from 'lucide-react'
 import Image from 'next/image'
 import { useState } from 'react'
-import { formatDate, missingCriteria, type Booking, type Resource, type UserProfile, type WaitlistEntry } from '@/lib/resources'
+import { formatDate, formatHourlyRate, missingCriteria, type Booking, type Resource, type UserProfile, type WaitlistEntry } from '@/lib/resources'
 import { FileDrop, Modal, StatusBadge, btnGhost, btnPrimary, inputCls, labelCls } from './ui'
 
 type Props = {
@@ -36,6 +36,25 @@ export function ResourceModal({ resource, user, activeBooking, waitEntry, onClos
             <Image src={resource.image} alt={resource.name} fill sizes="(min-width:768px) 40vw, 100vw" className="object-cover" />
           </div>
           <p className="mt-4 text-sm leading-relaxed text-white/75">{resource.description}</p>
+          {resource.hourlyRate != null && (
+            <section aria-label="Pricing and assistance" className="mt-4 rounded-2xl bg-cream/[0.06] p-4 ring-1 ring-cream/10">
+              <p className="text-xs uppercase tracking-wider text-stone">Indicative use price</p>
+              <p className="mt-1 font-display text-xl font-medium text-cream">
+                {formatHourlyRate(resource.hourlyRate)}
+              </p>
+              {resource.assistance ? (
+                <p className="mt-2 text-sm leading-relaxed text-white/80">
+                  Optional help from {resource.assistance.name} ({resource.assistance.qualification}) is
+                  {' '}+{formatHourlyRate(resource.assistance.hourlyRate)} extra.
+                </p>
+              ) : (
+                <p className="mt-2 text-sm text-white/70">Listed for independent use.</p>
+              )}
+              <p className="mt-2 text-xs leading-relaxed text-stone">
+                Sample listing only. Confirm final pricing and staff availability with the facility owner.
+              </p>
+            </section>
+          )}
           <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
             {[
               ['Owner', resource.owner],
@@ -131,7 +150,7 @@ export function ResourceModal({ resource, user, activeBooking, waitEntry, onClos
                 <textarea id="b-purpose" rows={3} value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="Describe the project and procedure." className={inputCls} />
               </div>
               <p className="text-xs leading-relaxed text-stone">
-                No payment required. Access is governed by institutional accountability and a dual-signed liability agreement.
+                ResourcX does not collect payment. Listed rates are indicative samples; access is governed by institutional accountability and a dual-signed liability agreement.
               </p>
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button onClick={onClose} className={btnGhost}>Cancel</button>

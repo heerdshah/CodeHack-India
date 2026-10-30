@@ -26,6 +26,17 @@ export const CERTIFICATIONS = [
 export const ANGLES = ['Front', 'Back', 'Left', 'Right', 'Top', 'Bottom'] as const
 export type Angle = (typeof ANGLES)[number]
 
+export type ResourceAssistance = {
+  name: string
+  qualification: string
+  hourlyRate: number
+}
+
+export type ResourcePricing = {
+  hourlyRate: number
+  assistance: ResourceAssistance | null
+}
+
 export type Resource = {
   id: string
   name: string
@@ -47,6 +58,64 @@ export type Resource = {
   bookedUntil: string | null
   queue: number
   distance_km?: number | null
+  hourlyRate?: number
+  assistance?: ResourceAssistance | null
+}
+
+const RESOURCE_PRICING: Record<string, ResourcePricing> = {
+  'cnc-5axis': {
+    hourlyRate: 900,
+    assistance: { name: 'Priya Shah', qualification: 'Certified CNC operator', hourlyRate: 400 },
+  },
+  'ur10-cobot': { hourlyRate: 700, assistance: null },
+  'sla-printer': {
+    hourlyRate: 450,
+    assistance: { name: 'Neha Kapoor', qualification: 'Certified 3D fabrication specialist', hourlyRate: 250 },
+  },
+  hplc: {
+    hourlyRate: 1200,
+    assistance: { name: 'Dr. Farah Khan', qualification: 'Chemical hygiene specialist', hourlyRate: 600 },
+  },
+  confocal: { hourlyRate: 1000, assistance: null },
+  'sound-stage': {
+    hourlyRate: 1500,
+    assistance: { name: 'Kabir Mehta', qualification: 'Certified studio technician', hourlyRate: 500 },
+  },
+}
+
+const SAMPLE_ASSISTANTS = [
+  { name: 'Priya Shah', qualification: 'Certified lab technician' },
+  { name: 'Neha Kapoor', qualification: 'Certified equipment specialist' },
+  { name: 'Kabir Mehta', qualification: 'Certified studio technician' },
+]
+
+export function resourcePricingFor(id: string): ResourcePricing {
+  const listedPricing = RESOURCE_PRICING[id]
+  if (listedPricing) return listedPricing
+
+  const stableHash = Array.from(id).reduce(
+    (hash, character) => (hash * 31 + character.charCodeAt(0)) >>> 0,
+    7
+  )
+  const assistance = stableHash % 3 === 0
+    ? {
+        ...SAMPLE_ASSISTANTS[stableHash % SAMPLE_ASSISTANTS.length],
+        hourlyRate: 300 + (stableHash % 4) * 100,
+      }
+    : null
+
+  return {
+    hourlyRate: 400 + (stableHash % 9) * 100,
+    assistance,
+  }
+}
+
+export function formatHourlyRate(rate: number) {
+  return `${new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(rate)}/hr`
 }
 
 export type UserProfile = {

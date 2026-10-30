@@ -3,7 +3,14 @@
  * Wraps all backend endpoints with cookie-based credentials and typed responses.
  */
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+import { resourcePricingFor, type ResourceAssistance } from './resources'
+
+const normalizeLocalHost = (value: string): string => {
+  const normalized = value.trim()
+  return normalized.replace(/^(https?:)\/\/localhost(?=[:/]|$)/i, '$1://127.0.0.1')
+}
+
+export const API_BASE = normalizeLocalHost(process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000')
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
@@ -106,6 +113,8 @@ export type Resource = {
   bookedUntil: string | null
   queue: number
   distance_km?: number | null
+  hourlyRate?: number
+  assistance?: ResourceAssistance | null
 }
 
 export type InspectionSet = {
@@ -336,6 +345,7 @@ export const api = {
       const res = await request<any[]>(`/resources?${sp.toString()}`)
       return res.map((r) => ({
         id: r.id,
+        ...resourcePricingFor(r.id),
         name: r.name,
         department: r.department,
         category: r.category as Category,
@@ -362,6 +372,7 @@ export const api = {
       const r = await request<any>(`/resources/${id}`)
       return {
         id: r.id,
+        ...resourcePricingFor(r.id),
         name: r.name,
         department: r.department,
         category: r.category as Category,

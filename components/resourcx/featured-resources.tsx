@@ -3,7 +3,7 @@
 import { ArrowRight } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { formatDate, type Resource } from '@/lib/resources'
+import { formatDate, formatHourlyRate, type Resource } from '@/lib/resources'
 import { SectionHeading, btnGhost } from './ui'
 
 const FEATURED_IMAGES: Record<string, string> = {
@@ -84,6 +84,19 @@ export function FeaturedResources({
                 {resource.department} · {resource.location}
               </p>
 
+              <div className="mt-4 border-t border-white/10 pt-3">
+                <p className="font-display text-base font-medium text-cream">
+                  {resource.hourlyRate != null
+                    ? formatHourlyRate(resource.hourlyRate)
+                    : 'Contact owner for price'}
+                </p>
+                {resource.assistance && (
+                  <p className="mt-1 text-xs leading-relaxed text-stone">
+                    Help with {resource.assistance.name} · +{formatHourlyRate(resource.assistance.hourlyRate)}
+                  </p>
+                )}
+              </div>
+
               <button
                 onClick={() => onView(resource)}
                 className={`${btnGhost} mt-auto w-full px-3 py-2 text-xs`}
@@ -94,6 +107,10 @@ export function FeaturedResources({
           </li>
         ))}
       </ul>
+
+      <p className="mt-4 text-center text-xs text-stone">
+        Sample rates and assistance contacts; confirm availability and final pricing with the facility owner.
+      </p>
 
       <div className="mt-10 text-center">
         <Link
