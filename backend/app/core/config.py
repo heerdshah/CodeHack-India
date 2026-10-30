@@ -28,14 +28,16 @@ class Settings(BaseSettings):
     GROQ_TEXT_MODEL: str = "llama-3.3-70b-versatile"
     
     # CORS
+    # backend/app/core/config.py
     FRONTEND_ORIGIN: str = "https://resourcx-main-heerdshah83-5681s-projects.vercel.app"
 
+# Ensure all origin variations and wildcards are present
     ALLOWED_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://resourcx-main-heerdshah83-5681s-projects.vercel.app",
-        "https://*.vercel.app"
-    ]
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://resourcx-main-heerdshah83-5681s-projects.vercel.app",
+    "https://resourcx-m0fyhlek7-heerdshah83-5681.vercel.app",  # Your current active preview URL
+]
     # Email / Notifications
     SMTP_HOST: Optional[str] = None
     SMTP_PORT: int = 587
