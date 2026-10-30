@@ -1,8 +1,10 @@
+import asyncio
 from types import SimpleNamespace
 
-from backend.app.core.deps import get_current_user
+from app.core.deps import get_current_user
+from app.repositories.local_chat_repo import LocalChatRepository
 from backend.app.main import app as asgi_app
-from backend.app.routers import chat
+from app.routers import chat
 
 
 CURRENT_USER_ID = "11111111-1111-1111-1111-111111111111"
@@ -85,3 +87,42 @@ def test_authenticated_user_can_start_direct_chat_by_username(client, monkeypatc
     assert response.json()["id"] == CONVERSATION_ID
     assert response.json()["booking_id"] is None
     assert response.json()["other_user"]["username"] == "mira"
+
+
+def test_local_direct_chat_can_send_and_receive_messages(client, monkeypatch, tmp_path):
+    fastapi_app = asgi_app.app
+    active_user = {"id": CURRENT_USER_ID, "username": "current"}
+    fastapi_app.dependency_overrides[get_current_user] = lambda: active_user
+    monkeypatch.setattr(chat, "_client", lambda: None)
+    local_repo = LocalChatRepository(tmp_path / "chat.sqlite3")
+    monkeypatch.setattr(chat, "local_chat_repo", local_repo)
+
+    try:
+        started = client.post("/chat/direct", json={"username": "mira_okafor"})
+        assert started.status_code == 200, started.text
+        conversation_id = started.json()["id"]
+
+        sent = client.post(
+            f"/chat/conversations/{conversation_id}/messages",
+            json={"content": "Hello there"},
+        )
+        assert sent.status_code == 201, sent.text
+        assert sent.json()["content"] == "Hello there"
+
+        active_user = {"id": OTHER_USER_ID, "username": "mira_okafor"}
+        inbox = client.get("/chat/conversations")
+        received = client.get(f"/chat/conversations/{conversation_id}/messages")
+    finally:
+        fastapi_app.dependency_overrides.pop(get_current_user, None)
+
+    assert received.status_code == 200
+    assert received.json()[0]["content"] == "Hello there"
+    assert inbox.status_code == 200
+    assert inbox.json()[0]["id"] == conversation_id
+    assert inbox.json()[0]["unread_count"] == 1
+
+    restarted_repo = LocalChatRepository(tmp_path / "chat.sqlite3")
+    persisted_messages = asyncio.run(
+        restarted_repo.list_messages(conversation_id, OTHER_USER_ID)
+    )
+    assert persisted_messages[0]["content"] == "Hello there"

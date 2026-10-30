@@ -1,462 +1,376 @@
 'use client'
 
-import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { MessageCircle, Send, X } from 'lucide-react'
-import type { Booking, Mode, Resource, UserProfile } from '@/lib/resources'
-import { api, type ChatConversation, type ChatMessage } from '@/lib/api'
-import { btnPrimary } from './ui'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, MessageSquare, Search, Send, UserRound } from 'lucide-react'
+
+import { api, type ChatConversation, type ChatMessage, type ChatUser } from '@/lib/api'
+import type { UserProfile } from '@/lib/resources'
 
 type Props = {
   open: boolean
   user: UserProfile
-  mode: Mode
-  bookings: Booking[]
-  resources: Resource[]
   onClose: () => void
-  presentation?: 'modal' | 'page'
+  onUnreadCountChange?: (count: number) => void
 }
 
-const terminalStatuses = new Set(['rejected', 'cancelled'])
-
-export function ChatModal({
-  open,
-  user,
-  mode,
-  bookings,
-  resources,
-  onClose,
-  presentation = 'modal',
-}: Props) {
+export function ChatModal({ open, user, onClose, onUnreadCountChange }: Props) {
   const [conversations, setConversations] = useState<ChatConversation[]>([])
-  const [conversationsLoaded, setConversationsLoaded] = useState(false)
-  const [selected, setSelected] = useState<ChatConversation | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [messageText, setMessageText] = useState('')
-  const [username, setUsername] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [query, setQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<ChatUser[]>([])
+  const [searching, setSearching] = useState(false)
+  const [loadingConversations, setLoadingConversations] = useState(true)
+  const [loadingMessages, setLoadingMessages] = useState(false)
+  const [startingConversation, setStartingConversation] = useState(false)
   const [sending, setSending] = useState(false)
-  const [starting, setStarting] = useState(false)
+  const [messageText, setMessageText] = useState('')
   const [error, setError] = useState('')
-  const selectedRef = useRef<ChatConversation | null>(null)
-  const messageCache = useRef(new Map<string, ChatMessage[]>())
-  const openRef = useRef(open)
-  openRef.current = open
+  const [searchError, setSearchError] = useState('')
+  const [messageError, setMessageError] = useState('')
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const addMessage = useCallback((message: ChatMessage) => {
-    const cached = messageCache.current.get(message.conversation_id) ?? []
-    const updated = cached.some((existing) => existing.id === message.id)
-      ? cached
-      : [...cached, message].sort((a, b) => a.created_at.localeCompare(b.created_at))
-    messageCache.current.set(message.conversation_id, updated)
-
-    if (selectedRef.current?.id === message.conversation_id) {
-      setMessages(updated)
-    }
-  }, [])
+  const selected = useMemo(
+    () => conversations.find((conversation) => conversation.id === selectedId) ?? null,
+    [conversations, selectedId]
+  )
 
   const loadConversations = useCallback(async () => {
-    setError('')
     try {
-      const fetched = await api.chat.listConversations()
-      setConversations((current) =>
-        fetched.map((conversation) => ({
-          ...conversation,
-          unread_count: Math.max(
-            conversation.unread_count,
-            current.find((item) => item.id === conversation.id)?.unread_count ?? 0
-          ),
-        }))
-      )
+      const result = await api.chat.listConversations()
+      setConversations(result)
+      setError('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load conversations.')
     } finally {
-      setConversationsLoaded(true)
+      setLoadingConversations(false)
     }
   }, [])
 
   useEffect(() => {
+    if (!open) return
     void loadConversations()
-  }, [loadConversations, user.id])
 
-  useEffect(() => {
-    const refreshInbox = () => {
+    const intervalId = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadConversations()
-    }
-
-    const intervalId = window.setInterval(refreshInbox, 10_000)
-    window.addEventListener('focus', refreshInbox)
-    document.addEventListener('visibilitychange', refreshInbox)
-
-    return () => {
-      window.clearInterval(intervalId)
-      window.removeEventListener('focus', refreshInbox)
-      document.removeEventListener('visibilitychange', refreshInbox)
-    }
-  }, [loadConversations])
+    }, 10_000)
+    return () => window.clearInterval(intervalId)
+  }, [loadConversations, open, user.id])
 
   useEffect(() => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    if (!url || !anonKey) {
-      setError('Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable live chat updates.')
+    onUnreadCountChange?.(
+      conversations.reduce((total, conversation) => total + conversation.unread_count, 0)
+    )
+  }, [conversations, onUnreadCountChange])
+
+  useEffect(() => {
+    const trimmed = query.trim().replace(/^@/, '')
+    if (trimmed.length < 2) {
+      setSearchResults([])
+      setSearchError('')
+      setSearching(false)
       return
     }
 
     let active = true
-    let client: SupabaseClient | null = null
-    let refreshTimer: ReturnType<typeof setInterval> | undefined
-
-    const connect = async () => {
-      try {
-        const token = await api.chat.getRealtimeToken()
-        if (!active) return
-
-        client = createClient(url, anonKey, {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
-          },
+    setSearching(true)
+    const timeoutId = window.setTimeout(() => {
+      api.chat.searchUsers(trimmed)
+        .then((results) => {
+          if (active) {
+            setSearchResults(results)
+            setSearchError('')
+          }
         })
-        client.realtime.setAuth(token)
-        const channel = client
-          .channel(`chat-user-${user.id}`)
-          .on(
-            'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'messages' },
-            (payload) => {
-              const incoming = payload.new as ChatMessage
-              if (!incoming.id || incoming.sender_id === user.id) return
+        .catch((cause: unknown) => {
+          if (active) {
+            setSearchError(cause instanceof Error ? cause.message : 'Could not search usernames.')
+          }
+        })
+        .finally(() => {
+          if (active) setSearching(false)
+        })
+    }, 250)
 
-              void loadConversations()
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [query])
 
-              setConversations((current) =>
-                current.map((conversation) =>
-                  conversation.id === incoming.conversation_id
-                    ? {
-                        ...conversation,
-                        unread_count:
-                          openRef.current && selectedRef.current?.id === conversation.id
-                            ? conversation.unread_count
-                            : conversation.unread_count + 1,
-                      }
-                    : conversation
-                )
-              )
+  useEffect(() => {
+    if (!open || !selectedId) {
+      setMessages([])
+      return
+    }
 
-              if (openRef.current && selectedRef.current?.id === incoming.conversation_id) {
-                addMessage(incoming)
-                void api.chat.markRead(incoming.conversation_id).catch((cause) => {
-                  setError(cause instanceof Error ? cause.message : 'Could not mark messages read.')
-                })
-              }
-            }
+    let active = true
+    const loadMessages = async () => {
+      try {
+        const result = await api.chat.getMessages(selectedId)
+        if (!active) return
+        setMessages(result)
+        setMessageError('')
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === selectedId
+              ? { ...conversation, unread_count: 0 }
+              : conversation
           )
-          .subscribe((status, cause) => {
-            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-              setError(cause?.message || 'Live chat connection failed.')
-            }
-          })
-
-        refreshTimer = setInterval(() => {
-          void api.chat.getRealtimeToken()
-            .then((freshToken) => client?.realtime.setAuth(freshToken))
-            .catch((cause) => {
-              setError(cause instanceof Error ? cause.message : 'Could not refresh chat connection.')
-            })
-        }, 10 * 60 * 1000)
-
-        return () => {
-          void client?.removeChannel(channel)
-        }
+        )
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Could not connect live chat.')
+        if (active) {
+          setMessageError(cause instanceof Error ? cause.message : 'Could not load messages.')
+        }
+      } finally {
+        if (active) setLoadingMessages(false)
       }
     }
 
-    let cleanupChannel: (() => void) | undefined
-    void connect().then((cleanup) => {
-      cleanupChannel = cleanup
-      if (!active) cleanupChannel?.()
-    })
+    setMessages([])
+    setMessageError('')
+    setLoadingMessages(true)
+    void loadMessages()
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadMessages()
+    }, 3_000)
 
     return () => {
       active = false
-      if (refreshTimer) clearInterval(refreshTimer)
-      cleanupChannel?.()
-      if (client) void client.removeAllChannels()
+      window.clearInterval(intervalId)
     }
-  }, [addMessage, loadConversations, user.id])
+  }, [open, selectedId])
 
   useEffect(() => {
-    selectedRef.current = selected
-    if (!open || !selected) {
-      setMessages([])
-      setLoading(false)
-      return
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
-    let active = true
-    const cachedMessages = messageCache.current.get(selected.id) ?? []
-    setMessages(cachedMessages)
-    setLoading(cachedMessages.length === 0)
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === selected.id ? { ...conversation, unread_count: 0 } : conversation
-      )
-    )
-
-    void Promise.all([
-      api.chat.markRead(selected.id),
-      api.chat.listMessages(selected.id),
-    ])
-      .then(([, history]) => {
-        const latestById = new Map(
-          [...(messageCache.current.get(selected.id) ?? []), ...history].map((message) => [
-            message.id,
-            message,
-          ])
-        )
-        const latest = [...latestById.values()].sort((a, b) =>
-          a.created_at.localeCompare(b.created_at)
-        )
-        messageCache.current.set(selected.id, latest)
-        if (active) setMessages(latest)
-      })
-      .catch((cause) => {
-        if (active) setError(cause instanceof Error ? cause.message : 'Could not load chat history.')
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [open, selected])
-
-  if (!open) return null
-
-  const visibleBookings = bookings.filter((booking) =>
-    !terminalStatuses.has(booking.status) && (mode === 'user' ? booking.isMine : !booking.isMine)
-  )
-
-  const startConversation = async (bookingId: string) => {
-    setError('')
+  const openConversation = async (target: ChatUser) => {
+    setStartingConversation(true)
+    setSearchError('')
     try {
-      const conversation = await api.chat.createConversation(bookingId)
+      const conversation = await api.chat.startDirect(target.username)
       setConversations((current) => [
         conversation,
         ...current.filter((item) => item.id !== conversation.id),
       ])
-      setSelected(conversation)
+      setSelectedId(conversation.id)
+      setQuery('')
+      setSearchResults([])
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not start this conversation.')
-    }
-  }
-
-  const startDirectConversation = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const targetUsername = username.trim().replace(/^@/, '')
-    if (!targetUsername || starting) return
-
-    setStarting(true)
-    setError('')
-    try {
-      const conversation = await api.chat.createDirectConversation(targetUsername)
-      setConversations((current) => [
-        conversation,
-        ...current.filter((item) => item.id !== conversation.id),
-      ])
-      setUsername('')
-      setSelected(conversation)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not start this conversation.')
+      setSearchError(cause instanceof Error ? cause.message : 'Could not start this conversation.')
     } finally {
-      setStarting(false)
+      setStartingConversation(false)
     }
   }
 
-  const submitMessage = async (event: FormEvent<HTMLFormElement>) => {
+  const sendMessage = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const content = messageText.trim()
-    if (!selected || !content || sending) return
+    if (!content || !selected || sending) return
 
     setSending(true)
-    setError('')
+    setMessageError('')
     try {
-      const sent = await api.chat.sendMessage(selected.id, content)
-      addMessage(sent)
+      const message = await api.chat.sendMessage(selected.id, content)
+      setMessages((current) => [...current, message])
       setMessageText('')
+      void loadConversations()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Message could not be sent.')
+      setMessageError(cause instanceof Error ? cause.message : 'Could not send this message.')
     } finally {
       setSending(false)
     }
   }
 
-  const resourceName = (bookingId: string | null) => {
-    if (!bookingId) return undefined
-    const booking = bookings.find((item) => item.id === bookingId)
-    return booking ? resources.find((resource) => resource.id === booking.resourceId)?.name : undefined
-  }
-
-  const isPage = presentation === 'page'
+  if (!open) return null
 
   return (
-    <div
-      className={isPage ? 'w-full' : 'fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm'}
-      role={isPage ? undefined : 'presentation'}
-    >
-      <section
-        role={isPage ? undefined : 'dialog'}
-        aria-modal={isPage ? undefined : true}
-        aria-labelledby="chat-title"
-        className={isPage
-          ? 'relative flex h-[calc(100dvh-6.5rem)] min-h-[24rem] w-full overflow-hidden rounded-xl border border-white/10 bg-panel shadow-2xl'
-          : 'relative flex h-[min(720px,92vh)] w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-panel shadow-2xl'}
-      >
-        <aside className={`${selected ? 'hidden sm:flex' : 'flex'} w-full shrink-0 flex-col border-r border-white/10 sm:w-80`}>
-          <div className="flex items-center justify-between border-b border-white/10 p-4">
+    <section className="flex h-[min(760px,calc(100dvh-7rem))] min-h-[480px] w-full overflow-hidden rounded-3xl border border-white/10 bg-[#151515] shadow-2xl">
+      <aside className={`${selected ? 'hidden sm:flex' : 'flex'} w-full shrink-0 flex-col border-r border-white/10 bg-white/[0.02] sm:w-72 lg:w-80`}>
+        <div className="border-b border-white/10 p-4">
+          <div className="flex items-center justify-between">
             <div>
-              <h2 id="chat-title" className="font-display text-xl font-medium">Messages</h2>
-              <p className="text-xs text-stone">Signed in as @{user.username}</p>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-stone">ResourcX</p>
+              <h1 className="mt-1 font-display text-xl text-cream">Messages</h1>
             </div>
-            <button onClick={onClose} aria-label={isPage ? 'Back to ResourcX' : 'Close chat'} className="rounded-full p-2 text-stone hover:bg-white/10 hover:text-white">
-              <X className="size-4" />
+            <button
+              type="button"
+              onClick={onClose}
+              className="grid size-9 place-items-center rounded-full text-stone transition hover:bg-white/10 hover:text-white"
+              aria-label="Back to home"
+            >
+              <ArrowLeft className="size-4" aria-hidden />
             </button>
           </div>
+          <label className="mt-4 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
+            <Search className="size-4 shrink-0 text-stone" aria-hidden />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search usernames"
+              aria-label="Search usernames"
+              className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-stone/70"
+            />
+          </label>
+        </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            <p className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-stone">Conversations</p>
-            {conversations.map((conversation) => (
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {(searching || searchResults.length > 0 || searchError) && (
+            <div className="mb-3">
+              <p className="px-3 py-2 text-[10px] font-medium uppercase tracking-widest text-stone">
+                Usernames
+              </p>
+              {searchError && <p role="alert" className="px-3 py-2 text-xs text-red-200">{searchError}</p>}
+              {searching && <p className="px-3 py-2 text-xs text-stone">Searching…</p>}
+              {!searching && query.trim().length >= 2 && searchResults.length === 0 && !searchError && (
+                <p className="px-3 py-2 text-xs text-stone">No matching usernames.</p>
+              )}
+              {searchResults.map((result) => (
+                <button
+                  type="button"
+                  key={result.id}
+                  onClick={() => void openConversation(result)}
+                  disabled={startingConversation}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/[0.06] disabled:opacity-50"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cream/10 text-cream">
+                    <UserRound className="size-4" aria-hidden />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm text-white">{result.name}</span>
+                    <span className="block truncate text-xs text-stone">@{result.username}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <p className="px-3 py-2 text-[10px] font-medium uppercase tracking-widest text-stone">
+            Conversations
+          </p>
+          {loadingConversations ? (
+            <p className="px-3 py-4 text-xs text-stone">Loading conversations…</p>
+          ) : conversations.length === 0 ? (
+            <p className="px-3 py-4 text-xs leading-relaxed text-stone">
+              No conversations yet. Search for a username to start one.
+            </p>
+          ) : (
+            conversations.map((conversation) => (
               <button
+                type="button"
                 key={conversation.id}
-                onClick={() => setSelected(conversation)}
-                className={`mb-1 flex w-full items-center justify-between gap-2 rounded-xl px-3 py-3 text-left transition ${
-                  selected?.id === conversation.id ? 'bg-cream/10 text-cream' : 'text-white hover:bg-white/5'
+                onClick={() => setSelectedId(conversation.id)}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${
+                  selectedId === conversation.id ? 'bg-cream/10' : 'hover:bg-white/[0.05]'
                 }`}
               >
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">@{conversation.other_user.username}</span>
-                  <span className="block truncate text-xs text-stone">{conversation.booking_id ? resourceName(conversation.booking_id) || `Booking ${conversation.booking_id}` : 'Direct message'}</span>
+                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white/10 text-cream">
+                  <UserRound className="size-4" aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-white">
+                    {conversation.other_user.name}
+                  </span>
+                  <span className="block truncate text-xs text-stone">
+                    @{conversation.other_user.username}
+                  </span>
                 </span>
                 {conversation.unread_count > 0 && (
-                  <span className="shrink-0 rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-semibold text-white">
-                    (+{conversation.unread_count})
+                  <span className="grid min-w-5 place-items-center rounded-full bg-cream px-1.5 py-0.5 text-[10px] font-semibold text-ink">
+                    {conversation.unread_count}
                   </span>
                 )}
               </button>
-            ))}
-            {conversations.length === 0 && (
-              <p className="px-2 py-3 text-sm text-stone">
-                {conversationsLoaded ? 'No conversations yet.' : 'Loading conversations…'}
-              </p>
-            )}
-
-            <form onSubmit={startDirectConversation} className="mt-4 rounded-xl border border-white/10 bg-black/10 p-3">
-              <label htmlFor="chat-username" className="block text-[11px] font-semibold uppercase tracking-wider text-stone">
-                Message anyone by username
-              </label>
-              <div className="mt-2 flex gap-2">
-                <input
-                  id="chat-username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  maxLength={80}
-                  placeholder="@username"
-                  className="min-w-0 flex-1 rounded-full border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-cream/50"
-                />
-                <button type="submit" disabled={!username.trim() || starting} className={`${btnPrimary} px-3 text-xs disabled:opacity-50`}>
-                  {starting ? 'Opening…' : 'Message'}
-                </button>
-              </div>
-            </form>
-
-            {visibleBookings.length > 0 && (
-              <>
-                <p className="mt-5 px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-stone">Start from a booking</p>
-                {visibleBookings.map((booking) => (
-                  <button
-                    key={booking.id}
-                    onClick={() => void startConversation(booking.id)}
-                    className="mb-1 flex w-full items-center justify-between gap-2 rounded-xl px-3 py-3 text-left text-white transition hover:bg-white/5"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">{resourceName(booking.id) || 'Booking conversation'}</span>
-                      <span className="block truncate text-xs text-stone">{booking.status} · {booking.id}</span>
-                    </span>
-                    <MessageCircle className="size-4 shrink-0 text-cream" />
-                  </button>
-                ))}
-              </>
-            )}
-          </div>
-        </aside>
-
-        <div className={`${selected ? 'flex' : 'hidden sm:flex'} min-w-0 flex-1 flex-col`}>
-          {selected ? (
-            <>
-              <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-                <button onClick={() => setSelected(null)} className="rounded-full px-2 py-1 text-xs text-stone hover:bg-white/10 sm:hidden">
-                  Back
-                </button>
-                <div className="min-w-0 flex-1">
-                  <h3 className="truncate font-medium">@{selected.other_user.username}</h3>
-                  <p className="truncate text-xs text-stone">{selected.booking_id ? resourceName(selected.booking_id) || `Booking ${selected.booking_id}` : 'Direct message'}</p>
-                </div>
-                <button onClick={onClose} aria-label={isPage ? 'Back to ResourcX' : 'Close chat'} className="rounded-full p-2 text-stone hover:bg-white/10 hover:text-white">
-                  <X className="size-4" />
-                </button>
-              </header>
-
-              <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
-                {loading && messages.length === 0 && <p className="text-sm text-stone">Loading messages…</p>}
-                {!loading && messages.length === 0 && <p className="mt-8 text-center text-sm text-stone">No messages yet. Say hello.</p>}
-                {messages.map((message) => (
-                  <div key={message.id} className={`flex ${message.sender_id === user.id ? 'justify-end' : 'justify-start'}`}>
-                    <article className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${
-                      message.sender_id === user.id ? 'bg-cream text-ink' : 'bg-white/10 text-white'
-                    }`}>
-                      <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
-                      <time className="mt-1 block text-right text-[10px] opacity-60" dateTime={message.created_at}>
-                        {new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                      </time>
-                    </article>
-                  </div>
-                ))}
-              </div>
-
-              <form onSubmit={submitMessage} className="flex gap-2 border-t border-white/10 p-3">
-                <label className="sr-only" htmlFor="chat-message">Message</label>
-                <input
-                  id="chat-message"
-                  value={messageText}
-                  onChange={(event) => setMessageText(event.target.value)}
-                  maxLength={4000}
-                  placeholder="Write a message…"
-                  className="min-w-0 flex-1 rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm text-white outline-none focus:border-cream/50"
-                />
-                <button type="submit" disabled={!messageText.trim() || sending} aria-label="Send message" className={`${btnPrimary} px-4 disabled:opacity-50`}>
-                  <Send className="size-4" />
-                </button>
-              </form>
-            </>
-          ) : (
-            <div className="hidden flex-1 flex-col items-center justify-center gap-3 text-stone sm:flex">
-              <MessageCircle className="size-9 opacity-50" />
-              <p className="text-sm">Select a conversation to view its messages.</p>
-            </div>
+            ))
           )}
+          {error && <p role="alert" className="px-3 py-3 text-xs text-red-200">{error}</p>}
         </div>
+      </aside>
 
-        {error && (
-          <p role="alert" className="absolute inset-x-4 bottom-4 rounded-xl border border-red-400/30 bg-red-950/90 px-4 py-3 text-sm text-red-200">
-            {error}
-          </p>
+      <div className={`${selected ? 'flex' : 'hidden sm:flex'} min-w-0 flex-1 flex-col`}>
+        {selected ? (
+          <>
+            <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3.5 sm:px-6">
+              <button
+                type="button"
+                onClick={() => setSelectedId(null)}
+                className="grid size-9 shrink-0 place-items-center rounded-full text-stone hover:bg-white/10 hover:text-white sm:hidden"
+                aria-label="Back to conversations"
+              >
+                <ArrowLeft className="size-4" aria-hidden />
+              </button>
+              <span className="grid size-10 place-items-center rounded-full bg-cream/10 text-cream">
+                <UserRound className="size-4" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold text-white">{selected.other_user.name}</h2>
+                <p className="truncate text-xs text-stone">@{selected.other_user.username}</p>
+              </div>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-6">
+              {loadingMessages && messages.length === 0 && (
+                <p className="text-center text-xs text-stone">Loading messages…</p>
+              )}
+              {!loadingMessages && messages.length === 0 && !messageError && (
+                <div className="flex h-full flex-col items-center justify-center text-center">
+                  <MessageSquare className="size-8 text-stone/50" aria-hidden />
+                  <p className="mt-3 text-sm text-stone">No messages yet</p>
+                  <p className="mt-1 text-xs text-stone/70">Send a message to start the conversation.</p>
+                </div>
+              )}
+              {messages.map((message) => {
+                const isMine = message.sender_id === user.id
+                return (
+                  <div key={message.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${
+                      isMine ? 'rounded-br-sm bg-cream text-ink' : 'rounded-bl-sm border border-white/10 bg-white/[0.06] text-white'
+                    }`}>
+                      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.content}</p>
+                      <time className={`mt-1 block text-right text-[10px] ${isMine ? 'text-ink/60' : 'text-stone/70'}`}>
+                        {new Date(message.created_at).toLocaleTimeString([], {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </time>
+                    </div>
+                  </div>
+                )
+              })}
+              {messageError && <p role="alert" className="text-center text-xs text-red-200">{messageError}</p>}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <form onSubmit={sendMessage} className="flex gap-2 border-t border-white/10 p-3 sm:p-4">
+              <input
+                value={messageText}
+                onChange={(event) => setMessageText(event.target.value)}
+                maxLength={4000}
+                placeholder="Write a message…"
+                aria-label="Message"
+                className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-stone/70 focus:border-cream/40"
+              />
+              <button
+                type="submit"
+                disabled={sending || !messageText.trim()}
+                className="inline-flex items-center gap-2 rounded-xl bg-cream px-4 py-3 text-sm font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Send className="size-4" aria-hidden />
+                <span className="hidden sm:inline">{sending ? 'Sending…' : 'Send'}</span>
+              </button>
+            </form>
+          </>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+            <MessageSquare className="size-10 text-stone/50" aria-hidden />
+            <p className="mt-4 font-display text-xl text-cream">Your conversations</p>
+            <p className="mt-2 max-w-xs text-sm leading-relaxed text-stone">
+              Select a conversation or search for a username to message someone.
+            </p>
+          </div>
         )}
-      </section>
-    </div>
+      </div>
+    </section>
   )
 }

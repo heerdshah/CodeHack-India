@@ -1,16 +1,14 @@
 'use client'
 
 import { ArrowRight, Bell, Layers, Shield } from 'lucide-react'
-
-import { useState } from 'react'
-import { matchesQuery, type Mode, type Resource, type UserProfile } from '@/lib/resources'
-
 import Link from 'next/link'
-
+import { useCallback, useEffect, useState } from 'react'
+import { api, type NotificationItem } from '@/lib/api'
+import type { Mode, UserProfile } from '@/lib/resources'
+import { NotificationsModal } from './notifications-modal'
 
 type Props = {
   user: UserProfile | null
-  authLoading?: boolean
   mode?: Mode
   onMode?: (m: Mode) => void
   unreadCount?: number
@@ -29,7 +27,6 @@ const LINKS = [
 ]
 export function SiteNav({
   user,
-  authLoading = false,
   mode,
   onMode,
   unreadCount = 0,
@@ -37,13 +34,52 @@ export function SiteNav({
   onOpenAdmin,
   onProfile,
 }: Props) {
+  const [localNotifications, setLocalNotifications] = useState<NotificationItem[]>([])
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [notificationsError, setNotificationsError] = useState('')
+  const usesLocalNotifications = Boolean(user && !onToggleNotifications)
+  const refreshLocalNotifications = useCallback(async () => {
+    try {
+      setNotificationsError('')
+      setLocalNotifications(await api.notifications.list())
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Unable to load notifications.'
+      setNotificationsError(message)
+      console.error('Unable to load notifications:', cause)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!usesLocalNotifications) return
+
+    void refreshLocalNotifications()
+    const intervalId = window.setInterval(() => {
+      void refreshLocalNotifications()
+    }, 30_000)
+
+    return () => window.clearInterval(intervalId)
+  }, [refreshLocalNotifications, usesLocalNotifications, user?.id])
+
   const isOwnerOrAdmin =
     user &&
     ['owner', 'admin', 'manager'].includes(user.systemRole || '')
 
   const isAdmin = user && user.systemRole === 'admin'
+  const notificationsUnreadCount = onToggleNotifications
+    ? unreadCount
+    : localNotifications.filter((notification) => !notification.is_read).length
+
+  const openNotifications = () => {
+    if (onToggleNotifications) {
+      onToggleNotifications()
+      return
+    }
+    setNotificationsOpen(true)
+    void refreshLocalNotifications()
+  }
 
   return (
+    <>
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-ink/60 backdrop-blur-xl">
       <nav
         aria-label="Primary"
@@ -118,26 +154,20 @@ export function SiteNav({
               </div>
             )}
 
-            {/* Notification Bell */}
-            {(user || authLoading) && onToggleNotifications && (
+            {user && (
               <button
                 type="button"
-                disabled={!user}
-                onClick={onToggleNotifications}
+                onClick={openNotifications}
                 aria-label={`View notifications${
-                  !user
-                    ? ', loading'
-                    : unreadCount > 0
-                      ? `, ${unreadCount} unread`
-                      : ''
+                  notificationsUnreadCount > 0 ? `, ${notificationsUnreadCount} unread` : ''
                 }`}
-                className="relative grid size-9 place-items-center rounded-full border border-white/15 bg-black/30 text-white transition hover:border-cream/60 disabled:cursor-wait disabled:opacity-50"
+                className="relative grid size-9 place-items-center rounded-full border border-white/15 bg-black/30 text-white transition hover:border-cream/60"
               >
                 <Bell className="size-4" aria-hidden="true" />
 
-                {unreadCount > 0 && (
+                {notificationsUnreadCount > 0 && (
                   <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-                    {unreadCount > 9 ? '9+' : unreadCount}
+                    {notificationsUnreadCount > 9 ? '9+' : notificationsUnreadCount}
                   </span>
                 )}
               </button>
@@ -184,5 +214,15 @@ export function SiteNav({
         </div>
       </nav>
     </header>
+    {!onToggleNotifications && user && (
+      <NotificationsModal
+        open={notificationsOpen}
+        notifications={localNotifications}
+        error={notificationsError}
+        onClose={() => setNotificationsOpen(false)}
+        onRefresh={() => void refreshLocalNotifications()}
+      />
+    )}
+    </>
   )
 }

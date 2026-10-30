@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from typing import List, Optional, Dict, Any
 import uuid
 
-from backend.app.repositories.credential_repo import credential_repo
-from backend.app.repositories.user_repo import user_repo
-from backend.app.repositories.notification_repo import notification_repo
-from backend.app.services.ai import ai_service
-from backend.app.core.deps import get_current_user, require_owner
+from app.repositories.credential_repo import credential_repo
+from app.repositories.user_repo import user_repo
+from app.repositories.notification_repo import notification_repo
+from app.services.ai import ai_service
+from app.core.deps import get_current_user, require_owner
 
 router = APIRouter(prefix="/verification", tags=["AI Verification"])
 

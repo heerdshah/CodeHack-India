@@ -28,8 +28,9 @@ class Settings(BaseSettings):
     GROQ_TEXT_MODEL: str = "llama-3.3-70b-versatile"
     
     # CORS
-    FRONTEND_ORIGIN: str = "http://127.0.0.1:3000"
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000"]
+    FRONTEND_ORIGIN: str = "http://localhost:3000"
+    frontend_origin: str = "http://localhost:3000"
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     # Email / Notifications
     SMTP_HOST: Optional[str] = None

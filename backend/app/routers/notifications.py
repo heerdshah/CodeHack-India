@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Dict, Any
 
-from backend.app.repositories.notification_repo import notification_repo
-from backend.app.core.deps import get_current_user
+from app.repositories.notification_repo import notification_repo
+from app.core.deps import get_current_user
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 

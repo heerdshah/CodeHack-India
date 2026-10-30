@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 
-from backend.app.schemas.resource import ResourceCreateRequest, ResourceUpdateRequest, ResourceResponse
-from backend.app.repositories.resource_repo import resource_repo
-from backend.app.repositories.booking_repo import booking_repo
-from backend.app.core.deps import require_owner, get_current_user
+from app.schemas.resource import ResourceCreateRequest, ResourceUpdateRequest, ResourceResponse
+from app.repositories.resource_repo import resource_repo
+from app.repositories.booking_repo import booking_repo
+from app.core.deps import require_owner, get_current_user
 
 router = APIRouter(prefix="/resources", tags=["Resources"])
 

@@ -1,7 +1,11 @@
 import os
+import logging
+import base64
+import binascii
 import hashlib
 import uuid
 from io import BytesIO
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from reportlab.lib.pagesizes import letter
@@ -9,9 +13,15 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-from backend.app.core.config import settings
-from backend.app.repositories.agreement_repo import agreement_repo
-from backend.app.services.ai import ai_service
+from app.core.supabase import check_supabase_configured, get_supabase_admin
+from app.repositories.agreement_repo import agreement_repo
+from app.repositories.booking_repo import booking_repo
+from app.repositories.resource_repo import resource_repo
+from app.services.ai import ai_service
+
+logger = logging.getLogger("resourcx.agreements")
+AGREEMENT_BUCKET = "agreements"
+MAX_SIGNATURE_SIZE = 1024 * 1024
 
 MANDATORY_CLAUSES = [
     "1. Purpose & Access: The resource shall be accessed and utilized exclusively for the academic, research, or approved project purposes stated in this application.",
@@ -22,6 +32,43 @@ MANDATORY_CLAUSES = [
 ]
 
 class AgreementService:
+    async def get_signature_data(
+        self,
+        booking_id: str,
+        signer_role: str,
+        signature_path: Optional[str],
+    ) -> Optional[str]:
+        if not signature_path:
+            return None
+
+        expected_path = f"{booking_id}/signatures/{signer_role}.png"
+        if signature_path != expected_path:
+            return None
+
+        if os.environ.get("TESTING") == "1" or not check_supabase_configured():
+            path = Path.cwd() / "uploads" / AGREEMENT_BUCKET / Path(*expected_path.split("/"))
+            if not path.is_file():
+                return None
+            signature_bytes = path.read_bytes()
+        else:
+            client = get_supabase_admin()
+            if client is None:
+                raise RuntimeError("Agreement signature storage is unavailable.")
+            try:
+                signature_bytes = client.storage.from_(AGREEMENT_BUCKET).download(expected_path)
+            except Exception as exc:
+                logger.exception("Unable to retrieve %s signature for booking %s", signer_role, booking_id)
+                raise RuntimeError("Unable to retrieve the recorded digital signature.") from exc
+
+        if (
+            not isinstance(signature_bytes, (bytes, bytearray))
+            or not signature_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+            or len(signature_bytes) > MAX_SIGNATURE_SIZE
+        ):
+            raise RuntimeError("The stored digital signature is not a valid PNG.")
+
+        return f"data:image/png;base64,{base64.b64encode(signature_bytes).decode('ascii')}"
+
     def generate_pdf_bytes(
         self,
         booking: Dict[str, Any],
@@ -168,9 +215,43 @@ class AgreementService:
         expected_hash: str,
         client_ip: str
     ) -> Dict[str, Any]:
+        booking = await booking_repo.get_by_id(booking_id)
+        if not booking or booking.get("status") != "approved":
+            raise ValueError("The agreement can only be signed after the booking is approved.")
+        resource = await resource_repo.get_by_id(booking["resource_id"])
+        if signer_role == "user":
+            valid_signer = bool(
+                resource
+                and booking.get("user_id") == signer_id
+                and resource.get("owner_id") != signer_id
+            )
+        elif signer_role == "owner":
+            valid_signer = bool(
+                resource
+                and resource.get("owner_id") == signer_id
+                and booking.get("user_id") != signer_id
+            )
+        else:
+            raise ValueError("Invalid agreement signer role.")
+        if not valid_signer:
+            raise ValueError("Only the distinct borrower and resource owner may sign this agreement.")
+
         agreement = await agreement_repo.get_by_booking_id(booking_id)
         if not agreement:
             raise ValueError(f"Agreement not found for booking '{booking_id}'. The booking may not have been approved yet.")
+
+        signature_type, separator, encoded_signature = signature_data.partition(",")
+        if signature_type != "data:image/png;base64" or not separator:
+            raise ValueError("A valid PNG digital signature is required.")
+        try:
+            signature_bytes = base64.b64decode(encoded_signature, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("The digital signature image is invalid.") from exc
+        if (
+            not signature_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+            or len(signature_bytes) > MAX_SIGNATURE_SIZE
+        ):
+            raise ValueError("The digital signature must be a PNG no larger than 1MB.")
 
         # Check if this party has already signed
         if signer_role == "user" and agreement.get("user_signed_at"):
@@ -179,10 +260,24 @@ class AgreementService:
             raise ValueError("Owner signature has already been recorded for this agreement.")
 
         # Hash check: reject if document was altered
-        if expected_hash and expected_hash != agreement.get("document_hash"):
+        if not expected_hash or expected_hash != agreement.get("document_hash"):
             raise ValueError("Document integrity check failed: document hash changed (hash mismatch) or does not match server agreement.")
 
-        sig_path = f"agreements/sig_{booking_id}_{signer_role}.png"
+        sig_path = f"{booking_id}/signatures/{signer_role}.png"
+        if os.environ.get("TESTING") == "1" or not check_supabase_configured():
+            signature_file = Path.cwd() / "uploads" / AGREEMENT_BUCKET / Path(*sig_path.split("/"))
+            signature_file.parent.mkdir(parents=True, exist_ok=True)
+            signature_file.write_bytes(signature_bytes)
+        else:
+            client = get_supabase_admin()
+            if client is None:
+                raise RuntimeError("Agreement signature storage is unavailable.")
+            client.storage.from_(AGREEMENT_BUCKET).upload(
+                path=sig_path,
+                file=signature_bytes,
+                file_options={"content-type": "image/png", "upsert": "true"},
+            )
+
         updates = {}
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -206,7 +301,8 @@ class AgreementService:
             updates["signed_document_path"] = f"agreements/final_signed_{booking_id}.pdf"
 
         updated = await agreement_repo.update(agreement["id"], updates)
+        if not updated:
+            raise RuntimeError(f"Unable to persist the {signer_role} signature for booking {booking_id}.")
         return updated
 
 agreement_service = AgreementService()
-

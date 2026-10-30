@@ -1,14 +1,15 @@
-import secrets
+﻿import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Tuple
 
-from backend.app.repositories.booking_repo import booking_repo
-from backend.app.repositories.resource_repo import resource_repo
-from backend.app.repositories.user_repo import user_repo
-from backend.app.repositories.notification_repo import notification_repo
-from backend.app.repositories.audit_repo import audit_repo
-from backend.app.services.agreement_service import agreement_service
+from app.repositories.booking_repo import booking_repo
+from app.repositories.agreement_repo import agreement_repo
+from app.repositories.resource_repo import resource_repo
+from app.repositories.user_repo import user_repo
+from app.repositories.notification_repo import notification_repo
+from app.repositories.audit_repo import audit_repo
+from app.services.agreement_service import agreement_service
 
 # Strict state transitions table
 ALLOWED_TRANSITIONS = {
@@ -145,6 +146,14 @@ class BookingService:
         }
         created = await booking_repo.create(booking_data)
 
+        await notification_repo.create({
+            "user_id": user_id,
+            "type": "booking_submitted",
+            "title": "Booking Request Submitted",
+            "message": f"Your request for {resource.get('name', 'the resource') if resource else 'the resource'} was submitted for owner review.",
+            "data": {"booking_id": created["id"]},
+        })
+
         # Notify resource owner safely
         if resource and resource.get("owner_id"):
             try:
@@ -269,6 +278,13 @@ class BookingService:
         return new_booking
 
     async def generate_checkin_otp(self, booking_id: str) -> str:
+        booking = await booking_repo.get_by_id(booking_id)
+        if not booking or booking.get("status") != "signed":
+            raise ValueError("An access pass can only be issued after the booking agreement is fully signed.")
+        agreement = await agreement_repo.get_by_booking_id(booking_id)
+        if not agreement or not agreement.get("is_fully_signed"):
+            raise ValueError("Both the borrower and resource owner must sign before an access pass is issued.")
+
         otp = f"{secrets.randbelow(900000) + 100000}"
         expiry = datetime.now(timezone.utc) + timedelta(minutes=30)
         await booking_repo.update(booking_id, {
@@ -281,6 +297,11 @@ class BookingService:
         booking = await booking_repo.get_by_id(booking_id)
         if not booking:
             raise ValueError("Booking not found.")
+        if booking.get("status") != "signed":
+            raise ValueError("Check-in is only available after both parties sign the agreement.")
+        agreement = await agreement_repo.get_by_booking_id(booking_id)
+        if not agreement or not agreement.get("is_fully_signed"):
+            raise ValueError("Both agreement signatures are required before check-in.")
 
         stored_otp = booking.get("checkin_otp")
         expiry_str = booking.get("otp_expires_at")
@@ -301,4 +322,3 @@ class BookingService:
         return True
 
 booking_service = BookingService()
-

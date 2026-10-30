@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-from backend.app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository
 
 class IncidentRepository(BaseRepository):
     def __init__(self):
@@ -29,6 +29,25 @@ class IncidentRepository(BaseRepository):
             if res.data:
                 return res.data[0]
         return self._memory_incidents.get(incident_id)
+
+    async def get_by_booking_id(self, booking_id: str) -> Optional[Dict[str, Any]]:
+        if self.is_live():
+            res = (
+                self.get_client()
+                .table(self.table_name)
+                .select("*")
+                .eq("booking_id", booking_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                return res.data[0]
+        return next(
+            (incident for incident in self._memory_incidents.values()
+             if incident.get("booking_id") == booking_id),
+            None,
+        )
 
     async def list_all(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
         if self.is_live():
@@ -67,4 +86,3 @@ class IncidentRepository(BaseRepository):
         return None
 
 incident_repo = IncidentRepository()
-

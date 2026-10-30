@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-from backend.app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository
 
 class InspectionRepository(BaseRepository):
     def __init__(self):
@@ -61,6 +61,17 @@ class InspectionRepository(BaseRepository):
         self._memory_photos[photo_data["id"]] = photo_data
         return photo_data
 
+    async def update(self, inspection_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if self.is_live():
+            res = self.get_client().table(self.table_name).update(updates).eq("id", inspection_id).execute()
+            if res.data:
+                return res.data[0]
+        inspection = self._memory_inspections.get(inspection_id)
+        if inspection:
+            inspection.update(updates)
+            return inspection
+        return None
+
     async def get_photos_for_inspection(self, inspection_id: str) -> List[Dict[str, Any]]:
         if self.is_live():
             res = self.get_client().table("inspection_photos").select("*").eq("inspection_id", inspection_id).execute()
@@ -69,4 +80,3 @@ class InspectionRepository(BaseRepository):
         return [p for p in self._memory_photos.values() if p.get("inspection_id") == inspection_id]
 
 inspection_repo = InspectionRepository()
-

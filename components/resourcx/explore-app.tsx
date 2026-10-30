@@ -13,6 +13,7 @@ import type {
 } from '@/lib/resources'
 
 import { Catalogue } from './catalogue'
+import { BookingConfirmationModal } from './booking-confirmation-modal'
 import { ResourceModal } from './resource-modal'
 import { SiteNav } from './site-nav'
 import { SiteFooter } from './site-footer'
@@ -26,6 +27,7 @@ export function ExploreApp() {
   const [resources, setResources] = useState<Resource[]>([])
   const [bookings, setBookings] = useState<Booking[]>([])
   const [detailId, setDetailId] = useState<string | null>(null)
+  const [bookingConfirmationOpen, setBookingConfirmationOpen] = useState(false)
 
   const load = async (
     lat?: number | null,
@@ -83,7 +85,7 @@ export function ExploreApp() {
       startDate: string
       endDate: string
       purpose: string
-      proofFiles: string[]
+      proofFiles: File[]
     }
   ) => {
     if (!user) {
@@ -92,12 +94,15 @@ export function ExploreApp() {
     }
 
     try {
+      const uploadedProofs = await Promise.all(
+        input.proofFiles.map((file) => api.bookings.uploadProof(file))
+      )
       const result = await api.bookings.create({
         resource_id: resource.id,
         start_date: `${input.startDate}T09:00:00Z`,
         end_date: `${input.endDate}T17:00:00Z`,
         purpose: input.purpose,
-        proof_files: input.proofFiles,
+        proof_files: uploadedProofs.map((proof) => proof.path),
       })
 
       if (result.status === 'waitlisted') {
@@ -105,11 +110,13 @@ export function ExploreApp() {
           result.message ||
             'Slot busy. You have been placed on the FIFO waitlist.'
         )
+      } else {
+        setBookingConfirmationOpen(true)
       }
 
       setDetailId(null)
 
-      router.push('/#dashboard')
+      if (result.status === 'waitlisted') router.push('/#dashboard')
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -203,6 +210,11 @@ export function ExploreApp() {
           onJoinWaitlist={() => {}}
         />
       )}
+
+      <BookingConfirmationModal
+        open={bookingConfirmationOpen}
+        onClose={() => setBookingConfirmationOpen(false)}
+      />
     </div>
   )
 }

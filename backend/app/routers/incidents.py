@@ -1,19 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional, Dict, Any
 
-from backend.app.schemas.inspection import StandaloneIncidentCreateRequest, IncidentReviewRequest
-from backend.app.repositories.incident_repo import incident_repo
-from backend.app.repositories.resource_repo import resource_repo
-from backend.app.repositories.notification_repo import notification_repo
-from backend.app.repositories.audit_repo import audit_repo
-from backend.app.services.ai import ai_service
-from backend.app.core.deps import get_current_user, require_owner
+from app.schemas.inspection import StandaloneIncidentCreateRequest, IncidentReviewRequest
+from app.repositories.incident_repo import incident_repo
+from app.repositories.resource_repo import resource_repo
+from app.repositories.notification_repo import notification_repo
+from app.repositories.audit_repo import audit_repo
+from app.services.ai import ai_service
+from app.core.deps import get_current_user, require_owner
 
 router = APIRouter(prefix="/incidents", tags=["Incidents"])
 
 @router.get("")
 async def list_incidents(status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    return await incident_repo.list_all(status=status)
+    incidents = await incident_repo.list_all(status=status)
+    visible = []
+    can_manage_all = current_user.get("system_role") in {"manager", "admin"}
+    for incident in incidents:
+        resource = await resource_repo.get_by_id(incident["resource_id"])
+        if (
+            incident.get("reported_by") == current_user["id"]
+            or resource and resource.get("owner_id") == current_user["id"]
+            or can_manage_all
+        ):
+            visible.append(incident)
+    return visible
 
 @router.post("")
 async def create_standalone_incident(
@@ -70,6 +81,22 @@ async def review_incident(
     incident = await incident_repo.get_by_id(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+    resource = await resource_repo.get_by_id(incident["resource_id"])
+    if (
+        not resource
+        or resource.get("owner_id") != current_user["id"]
+        and current_user.get("system_role") not in {"manager", "admin"}
+    ):
+        raise HTTPException(status_code=403, detail="Only the resource owner can review this incident.")
+    if incident.get("title", "").startswith("Return inspection review:"):
+        raise HTTPException(
+            status_code=409,
+            detail="Use the return inspection review controls to record this decision.",
+        )
+    if req.status not in {"confirmed", "dismissed", "resolved"}:
+        raise HTTPException(status_code=400, detail="Invalid incident review status.")
+    if incident.get("status") != "under_review":
+        raise HTTPException(status_code=409, detail="This incident has already been reviewed.")
 
     updated = await incident_repo.update(incident_id, {
         "status": req.status,
@@ -87,4 +114,3 @@ async def review_incident(
     )
 
     return updated
-

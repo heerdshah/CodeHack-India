@@ -1,6 +1,6 @@
 import logging
 from typing import Any, Dict, List, Optional
-from backend.app.core.supabase import get_supabase_admin, check_supabase_configured
+from app.core.supabase import get_supabase_admin, check_supabase_configured
 
 logger = logging.getLogger("resourcx.repo")
 

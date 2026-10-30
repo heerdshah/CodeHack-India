@@ -4,13 +4,9 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AuthModal } from '@/components/resourcx/auth-modal'
 import { SiteNav } from '@/components/resourcx/site-nav'
-import type { UserProfile } from '@/lib/resources'
 
 export default function SignInPage() {
   const router = useRouter()
-  const cacheAuthenticatedUser = (user: UserProfile) => {
-    window.sessionStorage.setItem('resourcx.auth-user', JSON.stringify(user))
-  }
 
   return (
     <div className="min-h-screen bg-ink text-white">
@@ -27,11 +23,7 @@ export default function SignInPage() {
       </main>
 
       {/* Reuses your existing login + register flow */}
-      <AuthModal
-        open
-        onClose={() => router.replace('/')}
-        onRegister={cacheAuthenticatedUser}
-      />
+      <AuthModal open onClose={() => router.push('/')} onRegister={() => router.push('/')} />
     </div>
   )
 }

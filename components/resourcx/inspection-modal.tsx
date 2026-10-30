@@ -6,6 +6,49 @@ import { ANGLES, type Angle, type Booking, type InspectionSet, type Resource } f
 import { Modal, btnPrimary, btnGhost, inputCls, labelCls } from './ui'
 import { api } from '@/lib/api'
 
+async function prepareInspectionPhoto(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Choose an image file for this view.')
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    throw new Error('Choose an image smaller than 20 MB.')
+  }
+
+  const image = await createImageBitmap(file)
+  const scale = Math.min(1, 1600 / Math.max(image.width, image.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(image.width * scale))
+  canvas.height = Math.max(1, Math.round(image.height * scale))
+  const context = canvas.getContext('2d')
+  if (!context) {
+    image.close()
+    throw new Error('Could not prepare this image. Please try another photo.')
+  }
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  image.close()
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (result) => result ? resolve(result) : reject(new Error('Could not prepare this image.')),
+      'image/jpeg',
+      0.82
+    )
+  })
+  if (blob.size > 6 * 1024 * 1024) {
+    throw new Error('This photo is still too large. Choose a smaller image.')
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result)
+      else reject(new Error('Could not read this image.'))
+    }
+    reader.onerror = () => reject(new Error('Could not read this image.'))
+    reader.readAsDataURL(blob)
+  })
+}
+
 type Props = {
   booking: Booking | null
   resource: Resource | null
@@ -119,14 +162,14 @@ export function InspectionModal({ booking, resource, phase, onClose, onComplete 
                   onChange={(e) => {
                     const f = e.target.files?.[0]
                     if (f) {
-                      const reader = new FileReader()
-                      reader.onload = (re) => {
-                        if (re.target?.result) {
-                          setPhotos((p) => ({ ...p, [angle]: re.target!.result as string }))
-                        }
-                      }
-                      reader.readAsDataURL(f)
+                      setError(null)
+                      void prepareInspectionPhoto(f)
+                        .then((photo) => setPhotos((current) => ({ ...current, [angle]: photo })))
+                        .catch((cause: unknown) => {
+                          setError(cause instanceof Error ? cause.message : 'Could not load this image.')
+                        })
                     }
+                    e.target.value = ''
                   }}
                 />
               </label>
@@ -141,15 +184,6 @@ export function InspectionModal({ booking, resource, phase, onClose, onComplete 
             {scanning ? `AI vision analyzing… ${ANGLES[scanStep]}` : `${Object.keys(photos).length}/6 angles captured`}
           </p>
           <div className="flex gap-2">
-            {!ready && !scanning && (
-              <button
-                type="button"
-                onClick={() => setPhotos(Object.fromEntries(ANGLES.map((a) => [a, resource.image])))}
-                className="text-xs text-cream underline underline-offset-4"
-              >
-                Use sample photos
-              </button>
-            )}
             <button disabled={!ready || scanning} onClick={runScan} className={btnPrimary}>
               <ScanLine className="size-4" aria-hidden />
               {scanning ? 'Running AI Scan...' : 'Run AI Vision Scan'}
@@ -162,14 +196,18 @@ export function InspectionModal({ booking, resource, phase, onClose, onComplete 
         <div className="mt-5 space-y-3" aria-live="polite">
           <div className={`rounded-2xl p-4 ring-1 ${result.flagged ? 'bg-amber-300/10 ring-amber-300/30' : 'bg-emerald-300/10 ring-emerald-300/30'}`}>
             <p className="text-sm font-medium">
-              {result.flagged ? 'Scan flagged for facility owner review' : 'Scan clear — verified'}
+              {phase === 'post'
+                ? 'AI scan complete — awaiting owner review'
+                : result.flagged
+                  ? 'Scan flagged for facility owner review'
+                  : 'Baseline scan complete'}
             </p>
             <ul className="mt-1.5 list-inside list-disc text-sm text-white/75">
               {result.findings.map((f) => <li key={f}>{f}</li>)}
             </ul>
-            {result.flagged && (
+            {phase === 'post' && (
               <p className="mt-2 text-xs text-stone">
-                Incident review ticket automatically created for {resource.owner}. No automatic penalty is charged.
+                The owner can compare all six return photos with the baseline and report damage or confirm no damage.
               </p>
             )}
           </div>

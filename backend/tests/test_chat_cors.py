@@ -1,8 +1,8 @@
 from starlette.testclient import TestClient
 
-from backend.app.core.deps import get_current_user
+from app.core.deps import get_current_user
 from backend.app.main import app
-from backend.app.routers import chat
+from app.routers import chat
 
 
 def test_unhandled_chat_error_keeps_cors_headers(monkeypatch):

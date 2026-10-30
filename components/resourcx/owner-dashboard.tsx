@@ -6,6 +6,7 @@ import { formatDate, type Booking, type Resource } from '@/lib/resources'
 import { Panel } from './user-dashboard'
 import { StatusBadge, btnGhost, btnPrimary, inputCls, labelCls } from './ui'
 import { api } from '@/lib/api'
+import { OwnerInspectionReview } from './inspection-review'
 
 type Props = {
   bookings: Booking[]
@@ -265,7 +266,9 @@ export function OwnerDashboard({
             <p className="text-sm text-stone">No reported incidents.</p>
           ) : (
             <div className="space-y-3">
-              {incidentList.map((inc) => (
+              {incidentList.map((inc) => {
+                const inspectionBooking = bookings.find((booking) => booking.id === inc.booking_id)
+                return (
                 <div key={inc.id} className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -288,7 +291,20 @@ export function OwnerDashboard({
                     </div>
                   )}
 
-                  {inc.status === 'under_review' && (
+                  {inc.title?.startsWith('Return inspection review:') &&
+                    inspectionBooking?.post && (
+                    <OwnerInspectionReview
+                      booking={inspectionBooking}
+                      resourceName={
+                        resources.find((resource) => resource.id === inc.resource_id)?.name ??
+                        'Equipment'
+                      }
+                      onReviewed={() => void loadQueues()}
+                    />
+                  )}
+
+                  {inc.status === 'under_review' &&
+                    !inc.title?.startsWith('Return inspection review:') && (
                     <div className="mt-3 flex justify-end gap-2">
                       <button
                         onClick={() => handleReviewIncident(inc.id, 'dismissed')}
@@ -305,7 +321,8 @@ export function OwnerDashboard({
                     </div>
                   )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </Panel>

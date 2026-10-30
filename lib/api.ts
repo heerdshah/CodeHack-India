@@ -14,58 +14,58 @@ export const API_BASE = normalizeLocalHost(process.env.NEXT_PUBLIC_API_URL || 'h
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
-  const headers = new Headers(options.headers || {})
-  const method = (options.method || 'GET').toUpperCase()
-  const maxRetries = method === 'GET' ? 2 : 0
 
-  if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
+  const headers = new Headers(options.headers || {})
+
+  if (
+    options.body &&
+    !(options.body instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json')
   }
 
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    let response: Response
-    try {
-      response = await fetch(url, {
-        ...options,
-        headers,
-        credentials: 'include', // Ensures httpOnly session cookies are transmitted
-      })
-    } catch (error) {
-      if (attempt < maxRetries && error instanceof TypeError) {
-        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
-        continue
-      }
-      throw error
-    }
+  let response: Response
 
-    if (!response.ok) {
-      let errorDetail = 'Request failed'
-      try {
-        const errJson = await response.json()
-        errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson)
-      } catch {
-        errorDetail = response.statusText || `${response.status}`
-      }
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include',
+    })
+  } catch (error) {
+    console.error('ResourcX API connection failed:', {
+      url,
+      error,
+    })
 
-      const isConnectionReset =
-        response.status >= 500 &&
-        /winerror\s*10054|connection.*(?:reset|forcibly closed)/i.test(errorDetail)
-      if (attempt < maxRetries && isConnectionReset) {
-        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
-        continue
-      }
-      throw new Error(errorDetail)
-    }
-
-    // If response is empty or 204
-    if (response.status === 204) {
-      return {} as T
-    }
-
-    return response.json()
+    throw new Error(
+      `Cannot connect to the ResourcX backend at ${API_BASE}. ` +
+      'Check that the backend is running and the API URL is correct.'
+    )
   }
 
-  throw new Error('Request failed after retrying a temporary connection error.')
+  if (!response.ok) {
+    let errorDetail = 'Request failed'
+
+    try {
+      const errJson = await response.json()
+      errorDetail =
+        errJson.detail ||
+        errJson.message ||
+        JSON.stringify(errJson)
+    } catch {
+      errorDetail = response.statusText || `${response.status}`
+    }
+
+    throw new Error(errorDetail)
+  }
+
+  if (response.status === 204) {
+    return {} as T
+  }
+
+  return response.json()
 }
 
 // =============================================================================
@@ -118,10 +118,19 @@ export type Resource = {
 }
 
 export type InspectionSet = {
+  id?: string
   photos: Record<Angle, string>
   findings: string[]
   flagged: boolean
   completedAt: string
+  aiAnalysis?: Record<string, {
+    changed?: boolean
+    description?: string
+    severity?: string
+    confidence?: number
+    retake_needed?: boolean
+  }>
+  ownerDecision?: 'damage' | 'no_damage' | null
 }
 
 export type Applicant = {
@@ -161,7 +170,9 @@ export type Agreement = {
     tailored: string[]
   }
   user_signed_at?: string
+  user_signature?: string | null
   owner_signed_at?: string
+  owner_signature?: string | null
   is_fully_signed: boolean
 }
 
@@ -190,16 +201,18 @@ export type Incident = {
   review_notes?: string
 }
 
+export type ChatUser = {
+  id: string
+  username: string
+  name: string
+}
+
 export type ChatConversation = {
   id: string
   booking_id: string | null
   customer_id: string
   seller_id: string
-  other_user: {
-    id: string
-    username: string
-    name: string
-  }
+  other_user: ChatUser
   unread_count: number
 }
 
@@ -430,6 +443,46 @@ export const api = {
       })
     },
 
+    async uploadProof(file: File): Promise<{ path: string }> {
+      const formData = new FormData()
+      formData.append('file', file)
+      return request<{ path: string }>('/bookings/proofs', {
+        method: 'POST',
+        body: formData,
+      })
+    },
+
+    async attachProof(bookingId: string, file: File): Promise<{ path: string }> {
+      const formData = new FormData()
+      formData.append('file', file)
+      return request<{ path: string }>(
+        `/bookings/${encodeURIComponent(bookingId)}/proofs`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      )
+    },
+
+    async getProof(bookingId: string, index: number): Promise<Blob> {
+      const response = await fetch(
+        `${API_BASE}/bookings/${encodeURIComponent(bookingId)}/proofs/${index}`,
+        { credentials: 'include' }
+      )
+      if (!response.ok) {
+        let detail = response.statusText || `${response.status}`
+        try {
+          const error = await response.json()
+          detail = error.detail || error.message || detail
+        } catch {
+          // Keep the HTTP status when the server does not return JSON.
+        }
+        throw new Error(detail)
+      }
+
+      return response.blob()
+    },
+
     async updateStatus(id: string, status: string, rejectionReason?: string): Promise<any> {
       return request<any>(`/bookings/${id}/status`, {
         method: 'PATCH',
@@ -505,6 +558,37 @@ export const api = {
         body: JSON.stringify(data),
       })
     },
+
+    photoUrl(bookingId: string, phase: 'pre' | 'post', angle: Angle): string {
+      return `${API_BASE}/inspections/${encodeURIComponent(bookingId)}/${phase}/photos/${encodeURIComponent(angle)}`
+    },
+
+    async getPhoto(bookingId: string, phase: 'pre' | 'post', angle: Angle): Promise<Blob> {
+      const url = `${API_BASE}/inspections/${encodeURIComponent(bookingId)}/${phase}/photos/${encodeURIComponent(angle)}`
+      const response = await fetch(url, { credentials: 'include' })
+      if (!response.ok) {
+        let detail = response.statusText || `${response.status}`
+        try {
+          const error = await response.json()
+          detail = error.detail || error.message || detail
+        } catch {
+          // Keep the HTTP status when the server does not return JSON.
+        }
+        throw new Error(detail)
+      }
+      return response.blob()
+    },
+
+    async review(
+      bookingId: string,
+      decision: 'damage' | 'no_damage',
+      notes = ''
+    ): Promise<{ status: string; decision: 'damage' | 'no_damage' }> {
+      return request(`/inspections/${encodeURIComponent(bookingId)}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ decision, notes }),
+      })
+    },
   },
 
   // Incidents
@@ -551,44 +635,38 @@ export const api = {
     },
   },
 
-  // Direct and booking-scoped chat
+  // Direct username-based chat
   chat: {
     async listConversations(): Promise<ChatConversation[]> {
       return request<ChatConversation[]>('/chat/conversations')
     },
 
-    async createConversation(bookingId: string): Promise<ChatConversation> {
-      return request<ChatConversation>('/chat/conversations', {
-        method: 'POST',
-        body: JSON.stringify({ booking_id: bookingId }),
-      })
+    async searchUsers(query: string): Promise<ChatUser[]> {
+      const params = new URLSearchParams({ query })
+      return request<ChatUser[]>(`/chat/users?${params.toString()}`)
     },
 
-    async createDirectConversation(username: string): Promise<ChatConversation> {
+    async startDirect(username: string): Promise<ChatConversation> {
       return request<ChatConversation>('/chat/direct', {
         method: 'POST',
         body: JSON.stringify({ username }),
       })
     },
 
-    async listMessages(conversationId: string): Promise<ChatMessage[]> {
-      return request<ChatMessage[]>(`/chat/conversations/${conversationId}/messages`)
+    async getMessages(conversationId: string): Promise<ChatMessage[]> {
+      return request<ChatMessage[]>(
+        `/chat/conversations/${encodeURIComponent(conversationId)}/messages`
+      )
     },
 
     async sendMessage(conversationId: string, content: string): Promise<ChatMessage> {
-      return request<ChatMessage>(`/chat/conversations/${conversationId}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({ content }),
-      })
-    },
-
-    async markRead(conversationId: string): Promise<void> {
-      await request(`/chat/conversations/${conversationId}/read`, { method: 'POST' })
-    },
-
-    async getRealtimeToken(): Promise<string> {
-      const result = await request<{ token: string }>('/chat/realtime-token')
-      return result.token
+      return request<ChatMessage>(
+        `/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ content }),
+        }
+      )
     },
   },
 

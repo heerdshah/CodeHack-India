@@ -1,19 +1,18 @@
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from jose import jwt
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from backend.app.core.config import settings
-from backend.app.core.deps import get_current_user
-from backend.app.core.supabase import get_supabase_admin
+from app.core.config import settings
+from app.core.deps import get_current_user
+from app.core.supabase import get_supabase_admin
+from app.repositories.booking_repo import booking_repo
+from app.repositories.chat_repo import chat_repo
+from app.repositories.local_chat_repo import local_chat_repo
+from app.repositories.resource_repo import resource_repo
+from app.repositories.user_repo import user_repo
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
-
-
-class ConversationCreateRequest(BaseModel):
-    booking_id: str = Field(min_length=1, max_length=80)
 
 
 class DirectConversationRequest(BaseModel):
@@ -26,15 +25,15 @@ class MessageCreateRequest(BaseModel):
 
 def _client():
     client = get_supabase_admin()
-    if client is None:
+    if client is not None and not settings.SUPABASE_SERVICE_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Chat requires a configured Supabase service client.",
+            detail="Configure SUPABASE_SERVICE_KEY to use persistent chat.",
         )
     return client
 
 
-def _participant(conversation: dict[str, Any], user_id: str) -> bool:
+def _is_participant(conversation: dict[str, Any], user_id: str) -> bool:
     return user_id in (conversation["customer_id"], conversation["seller_id"])
 
 
@@ -47,26 +46,39 @@ def _get_conversation(client, conversation_id: str, user_id: str) -> dict[str, A
         .execute()
     )
     conversation = (result.data or [None])[0]
-    if not conversation or not _participant(conversation, user_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found.",
-        )
+    if not conversation or not _is_participant(conversation, user_id):
+        raise HTTPException(status_code=404, detail="Conversation not found.")
     return conversation
 
 
+async def _require_booking_chat_party(booking_id: str, user_id: str):
+    booking = await booking_repo.get_by_id(booking_id)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    resource = await resource_repo.get_by_id(booking["resource_id"])
+    if user_id not in {
+        booking.get("user_id"),
+        resource.get("owner_id") if resource else None,
+    }:
+        raise HTTPException(status_code=403, detail="You are not a party to this booking.")
+    return booking
+
+
 def _present_conversation(client, conversation: dict[str, Any], user_id: str) -> dict[str, Any]:
-    customer_id = conversation["customer_id"]
-    seller_id = conversation["seller_id"]
+    participant_ids = [conversation["customer_id"], conversation["seller_id"]]
     users = (
         client.table("users")
         .select("id,username,full_name")
-        .in_("id", [customer_id, seller_id])
+        .in_("id", participant_ids)
         .execute()
         .data
         or []
     )
-    other_user_id = seller_id if user_id == customer_id else customer_id
+    other_user_id = (
+        conversation["seller_id"]
+        if user_id == conversation["customer_id"]
+        else conversation["customer_id"]
+    )
     other_user = next((user for user in users if user["id"] == other_user_id), None)
     if not other_user:
         raise HTTPException(
@@ -93,33 +105,69 @@ def _present_conversation(client, conversation: dict[str, Any], user_id: str) ->
     }
 
 
-@router.get("/realtime-token")
-async def get_realtime_token(current_user: dict = Depends(get_current_user)):
-    if not settings.SUPABASE_JWT_SECRET:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Configure SUPABASE_JWT_SECRET to enable authenticated chat updates.",
-        )
-
-    now = datetime.now(timezone.utc)
-    token = jwt.encode(
-        {
-            "sub": current_user["id"],
-            "role": "authenticated",
-            "aud": "authenticated",
-            "iat": int(now.timestamp()),
-            "exp": int((now + timedelta(minutes=15)).timestamp()),
-        },
-        settings.SUPABASE_JWT_SECRET,
-        algorithm="HS256",
+async def _present_memory_conversation(conversation: dict[str, Any], user_id: str):
+    other_user_id = (
+        conversation["seller_id"]
+        if user_id == conversation["customer_id"]
+        else conversation["customer_id"]
     )
-    return {"token": token}
+    other_user = await user_repo.get_by_id(other_user_id)
+    if not other_user:
+        raise HTTPException(status_code=500, detail="The other participant's profile could not be loaded.")
+    unread_count = await local_chat_repo.unread_count(conversation["id"], user_id)
+    return {
+        **conversation,
+        "other_user": {
+            "id": other_user["id"],
+            "username": other_user["username"],
+            "name": other_user["full_name"],
+        },
+        "unread_count": unread_count,
+    }
+
+
+@router.get("/users")
+async def search_users(
+    query: str = Query(min_length=2, max_length=80),
+    current_user: dict = Depends(get_current_user),
+):
+    search = query.strip().removeprefix("@").lower()
+    if len(search) < 2:
+        return []
+    client = _client()
+    if client is None:
+        result_users = [
+            user
+            for user in await user_repo.list_all()
+            if user.get("id") != current_user["id"]
+            and user.get("username", "").lower().startswith(search)
+        ][:10]
+    else:
+        result = (
+            client.table("users")
+            .select("id,username,full_name")
+            .ilike("username", f"{search}%")
+            .neq("id", current_user["id"])
+            .limit(10)
+            .execute()
+        )
+        result_users = result.data or []
+    return [
+        {"id": user["id"], "username": user["username"], "name": user["full_name"]}
+        for user in result_users
+    ]
 
 
 @router.get("/conversations")
 async def list_conversations(current_user: dict = Depends(get_current_user)):
-    client = _client()
     user_id = current_user["id"]
+    client = _client()
+    if client is None:
+        conversations = await local_chat_repo.list_conversations(user_id)
+        return [
+            await _present_memory_conversation(conversation, user_id)
+            for conversation in conversations
+        ]
     result = (
         client.table("conversations")
         .select("id,booking_id,customer_id,seller_id")
@@ -133,79 +181,12 @@ async def list_conversations(current_user: dict = Depends(get_current_user)):
     ]
 
 
-@router.post("/conversations")
-async def create_conversation(
-    request: ConversationCreateRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    client = _client()
-    booking_result = (
-        client.table("bookings")
-        .select("id,user_id,resource_id,status")
-        .eq("id", request.booking_id)
-        .limit(1)
-        .execute()
-    )
-    booking = (booking_result.data or [None])[0]
-    if not booking:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-    if booking["status"] in {"rejected", "cancelled"}:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Chat is unavailable for rejected or cancelled bookings.",
-        )
-
-    resource_result = (
-        client.table("resources")
-        .select("owner_id")
-        .eq("id", booking["resource_id"])
-        .limit(1)
-        .execute()
-    )
-    resource = (resource_result.data or [None])[0]
-    if not resource:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found.")
-
-    customer_id = booking["user_id"]
-    seller_id = resource["owner_id"]
-    if customer_id == seller_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A booking customer cannot start a conversation with themselves.",
-        )
-    if current_user["id"] not in (customer_id, seller_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the booking customer or resource owner can start this chat.",
-        )
-
-    result = (
-        client.table("conversations")
-        .upsert(
-            {
-                "booking_id": booking["id"],
-                "customer_id": customer_id,
-                "seller_id": seller_id,
-            },
-            on_conflict="booking_id",
-        )
-        .execute()
-    )
-    conversation = (result.data or [None])[0]
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not create the booking conversation.",
-        )
-    return _present_conversation(client, conversation, current_user["id"])
-
-
 @router.post("/direct")
 async def create_direct_conversation(
     request: DirectConversationRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    username = request.username.strip().removeprefix("@")
+    username = request.username.strip().removeprefix("@").lower()
     if not username:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -213,14 +194,17 @@ async def create_direct_conversation(
         )
 
     client = _client()
-    result = (
-        client.table("users")
-        .select("id")
-        .eq("username", username)
-        .limit(1)
-        .execute()
-    )
-    other_user = (result.data or [None])[0]
+    if client is None:
+        other_user = await user_repo.get_by_username(username)
+    else:
+        result = (
+            client.table("users")
+            .select("id")
+            .eq("username", username)
+            .limit(1)
+            .execute()
+        )
+        other_user = (result.data or [None])[0]
     if not other_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -232,19 +216,24 @@ async def create_direct_conversation(
             detail="You cannot start a conversation with yourself.",
         )
 
-    result = client.rpc(
-        "get_or_create_direct_conversation",
-        {
-            "p_user_a": current_user["id"],
-            "p_user_b": other_user["id"],
-        },
-    ).execute()
-    conversation = (result.data or [None])[0]
+    if client is None:
+        conversation = await local_chat_repo.get_or_create_direct_conversation(
+            current_user["id"],
+            other_user["id"],
+        )
+    else:
+        result = client.rpc(
+            "get_or_create_direct_conversation",
+            {"p_user_a": current_user["id"], "p_user_b": other_user["id"]},
+        ).execute()
+        conversation = (result.data or [None])[0]
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not create the direct conversation.",
         )
+    if client is None:
+        return await _present_memory_conversation(conversation, current_user["id"])
     return _present_conversation(client, conversation, current_user["id"])
 
 
@@ -254,6 +243,11 @@ async def list_messages(
     current_user: dict = Depends(get_current_user),
 ):
     client = _client()
+    if client is None:
+        conversation = await local_chat_repo.get_conversation(conversation_id)
+        if not conversation or not _is_participant(conversation, current_user["id"]):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        return await local_chat_repo.list_messages(conversation_id, current_user["id"])
     _get_conversation(client, conversation_id, current_user["id"])
     result = (
         client.table("messages")
@@ -262,50 +256,7 @@ async def list_messages(
         .order("created_at")
         .execute()
     )
-    return result.data or []
-
-
-@router.post("/conversations/{conversation_id}/messages")
-async def send_message(
-    conversation_id: str,
-    request: MessageCreateRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    client = _client()
-    _get_conversation(client, conversation_id, current_user["id"])
-    content = request.content.strip()
-    if not content:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Message content cannot be blank.",
-        )
-    result = (
-        client.table("messages")
-        .insert(
-            {
-                "conversation_id": conversation_id,
-                "sender_id": current_user["id"],
-                "content": content,
-            }
-        )
-        .execute()
-    )
-    message = (result.data or [None])[0]
-    if not message:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Message could not be sent.",
-        )
-    return message
-
-
-@router.post("/conversations/{conversation_id}/read")
-async def mark_conversation_read(
-    conversation_id: str,
-    current_user: dict = Depends(get_current_user),
-):
-    client = _client()
-    _get_conversation(client, conversation_id, current_user["id"])
+    messages = result.data or []
     (
         client.table("messages")
         .update({"is_read": True})
@@ -314,4 +265,73 @@ async def mark_conversation_read(
         .eq("is_read", False)
         .execute()
     )
-    return {"ok": True}
+    return messages
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages",
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_message(
+    conversation_id: str,
+    request: MessageCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    content = request.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    client = _client()
+    if client is None:
+        conversation = await local_chat_repo.get_conversation(conversation_id)
+        if not conversation or not _is_participant(conversation, current_user["id"]):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        return await local_chat_repo.create_message(
+            conversation_id,
+            current_user["id"],
+            content,
+        )
+    _get_conversation(client, conversation_id, current_user["id"])
+    result = (
+        client.table("messages")
+        .insert({
+            "conversation_id": conversation_id,
+            "sender_id": current_user["id"],
+            "content": content,
+        })
+        .select("id,conversation_id,sender_id,content,is_read,created_at")
+        .execute()
+    )
+    message = (result.data or [None])[0]
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not send the message.",
+        )
+    return message
+
+
+@router.get("/{booking_id}/messages")
+async def list_booking_messages(
+    booking_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_booking_chat_party(booking_id, current_user["id"])
+    return await chat_repo.list_by_booking(booking_id)
+
+
+@router.post("/{booking_id}/messages")
+async def send_booking_message(
+    booking_id: str,
+    request: MessageCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    content = request.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    await _require_booking_chat_party(booking_id, current_user["id"])
+    return await chat_repo.create_message(
+        booking_id=booking_id,
+        sender_id=current_user["id"],
+        sender_name=current_user.get("full_name", "User"),
+        content=content,
+    )

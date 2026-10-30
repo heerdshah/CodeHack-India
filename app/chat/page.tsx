@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { api, type NotificationItem } from '@/lib/api'
-import type { Booking, Resource, UserProfile } from '@/lib/resources'
+import type { UserProfile } from '@/lib/resources'
 import { ChatModal } from '@/components/resourcx/chat-modal'
 import { NotificationsModal } from '@/components/resourcx/notifications-modal'
 import { SiteNav } from '@/components/resourcx/site-nav'
@@ -12,15 +12,17 @@ import { SiteNav } from '@/components/resourcx/site-nav'
 export default function ChatPage() {
   const router = useRouter()
   const [user, setUser] = useState<UserProfile | null>(null)
-  const [bookings, setBookings] = useState<Booking[]>([])
-  const [resources, setResources] = useState<Resource[]>([])
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   const loadNotifications = useCallback(async () => {
-    setNotifications(await api.notifications.list().catch(() => []))
+    try {
+      setNotifications(await api.notifications.list())
+    } catch (cause) {
+      console.error('Unable to load notifications:', cause)
+    }
   }, [])
 
   useEffect(() => {
@@ -38,12 +40,6 @@ export default function ChatPage() {
 
         setUser(currentUser)
         setLoading(false)
-        void api.bookings.list().then((items) => {
-          if (active) setBookings(items)
-        }).catch(() => {})
-        void api.resources.list().then((items) => {
-          if (active) setResources(items)
-        }).catch(() => {})
         void loadNotifications()
       } catch (cause) {
         if (active) {
@@ -65,15 +61,29 @@ export default function ChatPage() {
     }
   }, [loadNotifications, router])
 
+  useEffect(() => {
+    if (!user?.id) return
+
+    const refresh = () => void loadNotifications()
+    const intervalId = window.setInterval(refresh, 30_000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [loadNotifications, user?.id])
+
   const unreadCount = notifications.filter((notification) => !notification.is_read).length
 
   return (
     <div className="min-h-screen bg-ink text-white">
       <SiteNav
         user={user}
-        authLoading={loading}
         unreadCount={unreadCount}
-        onToggleNotifications={() => setNotificationsOpen(true)}
+        onToggleNotifications={() => {
+          setNotificationsOpen(true)
+          void loadNotifications()
+        }}
         onProfile={() => router.push('/account')}
       />
 
@@ -86,10 +96,6 @@ export default function ChatPage() {
           <ChatModal
             open
             user={user}
-            mode="user"
-            bookings={bookings}
-            resources={resources}
-            presentation="page"
             onClose={() => router.push('/')}
           />
         ) : null}

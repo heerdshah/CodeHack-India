@@ -12,7 +12,7 @@ type Props = {
   activeBooking?: Booking
   waitEntry?: WaitlistEntry
   onClose: () => void
-  onSubmit: (input: { startDate: string; endDate: string; purpose: string; proofFiles: string[] }) => void
+  onSubmit: (input: { startDate: string; endDate: string; purpose: string; proofFiles: File[] }) => void
   onJoinWaitlist: (startDate: string) => void
 }
 
@@ -21,6 +21,7 @@ export function ResourceModal({ resource, user, activeBooking, waitEntry, onClos
   const [end, setEnd] = useState('')
   const [purpose, setPurpose] = useState('')
   const [proofs, setProofs] = useState<Record<string, string[]>>({})
+  const [proofFiles, setProofFiles] = useState<Record<string, File[]>>({})
 
   const missing = missingCriteria(user, resource)
   const unresolved = missing.filter((c) => !proofs[c]?.length)
@@ -110,8 +111,10 @@ export function ResourceModal({ resource, user, activeBooking, waitEntry, onClos
                     key={c}
                     compact
                     label={`Upload proof: ${c}`}
+                    accept=".pdf,application/pdf"
                     files={proofs[c] ?? []}
                     onFiles={(names) => setProofs((p) => ({ ...p, [c]: names }))}
+                    onSelectFiles={(files) => setProofFiles((p) => ({ ...p, [c]: files }))}
                   />
                 ))}
               </div>
@@ -156,7 +159,7 @@ export function ResourceModal({ resource, user, activeBooking, waitEntry, onClos
                 <button onClick={onClose} className={btnGhost}>Cancel</button>
                 <button
                   disabled={!canSubmit}
-                  onClick={() => onSubmit({ startDate: start, endDate: end, purpose: purpose.trim(), proofFiles: Object.values(proofs).flat() })}
+                  onClick={() => onSubmit({ startDate: start, endDate: end, purpose: purpose.trim(), proofFiles: Object.values(proofFiles).flat() })}
                   className={btnPrimary}
                 >
                   Submit for owner review

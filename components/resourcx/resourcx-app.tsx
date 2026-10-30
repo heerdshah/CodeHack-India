@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+
 import {
   type Booking,
   type InspectionSet,
@@ -10,30 +11,21 @@ import {
   type UserProfile,
   type WaitlistEntry,
 } from '@/lib/resources'
-import { AgreementModal } from './agreement-modal'
-import { Hero } from './hero'
-import { InspectionModal } from './inspection-modal'
-
-import { ResourceModal } from './resource-modal'
-import { SiteNav } from './site-nav'
-import { AdminModal } from './admin-modal'
-import { NotificationsModal } from './notifications-modal'
-
-import { AuthModal } from './auth-modal'
-import { Catalogue } from './catalogue'
-
-
-import { Mission } from './mission'
-import { OwnerDashboard } from './owner-dashboard'
-
-import { SectionHeading } from './ui'
-import { UserDashboard } from './user-dashboard'
-
 
 import { api, type NotificationItem } from '@/lib/api'
+
 import { About } from './about'
+import { AdminModal } from './admin-modal'
+import { AgreementModal } from './agreement-modal'
+import { BookingConfirmationModal } from './booking-confirmation-modal'
 import { FeaturedResources } from './featured-resources'
+import { Hero } from './hero'
+import { InspectionModal } from './inspection-modal'
+import { NotificationsModal } from './notifications-modal'
+
+import { ResourceModal } from './resource-modal'
 import { SearchSection } from './search-section'
+import { SiteNav } from './site-nav'
 import { SiteFooter } from './site-footer'
 
 
@@ -54,12 +46,11 @@ export function ResourcXApp() {
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([])
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [authLoading, setAuthLoading] = useState(true)
 
   // Modals state
   const [adminOpen, setAdminOpen] = useState(false)
   const [notifsOpen, setNotifsOpen] = useState(false)
-  const [pendingResourceId, setPendingResourceId] = useState<string | null>(null)
+  const [bookingConfirmationOpen, setBookingConfirmationOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [agreementId, setAgreementId] = useState<string | null>(null)
   const [inspection, setInspection] = useState<{
@@ -73,26 +64,35 @@ export function ResourcXApp() {
     lng?: number | null
   ) => {
     try {
-      const resourceRequest = api.resources
-        .list({ lat, lng })
-        .then(setResources)
-      const bookingsRequest = api.bookings
-        .list()
-        .then(setBookings)
-        .catch(() => setBookings([]))
-      const userRequest = api.auth
-        .getMe()
-        .then(async (me) => {
+      const [fetchedResources, fetchedBookings] = await Promise.all([
+        api.resources.list({ lat, lng }),
+        api.bookings.list().catch(() => []),
+      ])
+
+      setResources(fetchedResources)
+      setBookings(fetchedBookings)
+
+      // Fetch the current user session
+      try {
+        const me = await api.auth.getMe()
+
+        if (me) {
           setUser(me)
-          setNotifications(await api.notifications.list().catch(() => []))
-        })
-        .catch(() => {
+
+          const myNotifs = await api.notifications
+            .list()
+            .catch(() => [])
+
+          setNotifications(myNotifs)
+        } else {
           setUser(null)
           setNotifications([])
-        })
-        .finally(() => setAuthLoading(false))
-
-      await Promise.all([resourceRequest, bookingsRequest, userRequest])
+        }
+      } catch {
+        // The visitor is not authenticated.
+        setUser(null)
+        setNotifications([])
+      }
     } catch (err) {
       console.error('Error loading initial ResourcX data:', err)
     } finally {
@@ -101,17 +101,31 @@ export function ResourcXApp() {
   }
 
   useEffect(() => {
-    const cachedUser = window.sessionStorage.getItem('resourcx.auth-user')
-    if (cachedUser) {
-      window.sessionStorage.removeItem('resourcx.auth-user')
-      try {
-        setUser(JSON.parse(cachedUser) as UserProfile)
-      } catch {
-        window.sessionStorage.removeItem('resourcx.auth-user')
-      }
-    }
     void loadAppData()
   }, [])
+
+  useEffect(() => {
+    if (!user?.id) return
+
+    let active = true
+    const refreshNotifications = async () => {
+      try {
+        const latest = await api.notifications.list()
+        if (active) setNotifications(latest)
+      } catch (err) {
+        console.error('Unable to refresh notifications:', err)
+      }
+    }
+
+    const refresh = () => void refreshNotifications()
+    const intervalId = window.setInterval(refresh, 30_000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [user?.id])
 
   const detail =
     resources.find((resource) => resource.id === detailId) ?? null
@@ -146,18 +160,21 @@ export function ResourcXApp() {
       startDate: string
       endDate: string
       purpose: string
-      proofFiles: string[]
+      proofFiles: File[]
     }
   ) => {
     if (!user) return
 
     try {
+      const uploadedProofs = await Promise.all(
+        input.proofFiles.map((file) => api.bookings.uploadProof(file))
+      )
       const result = await api.bookings.create({
         resource_id: resource.id,
         start_date: `${input.startDate}T09:00:00Z`,
         end_date: `${input.endDate}T17:00:00Z`,
         purpose: input.purpose,
-        proof_files: input.proofFiles,
+        proof_files: uploadedProofs.map((proof) => proof.path),
       })
 
       if (result.status === 'waitlisted') {
@@ -165,11 +182,13 @@ export function ResourcXApp() {
           result.message ||
             'Slot busy. You have been placed on the FIFO waitlist.'
         )
+      } else {
+        setBookingConfirmationOpen(true)
       }
 
       setDetailId(null)
       void loadAppData()
-      scrollToDashboard()
+      if (result.status === 'waitlisted') scrollToDashboard()
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Unknown error'
@@ -260,11 +279,17 @@ export function ResourcXApp() {
     <div className="min-h-screen bg-ink text-white">
       <SiteNav
         user={user}
-        authLoading={authLoading}
         mode={mode}
         onMode={changeMode}
         unreadCount={unreadNotifsCount}
-        onToggleNotifications={() => setNotifsOpen(true)}
+        onToggleNotifications={() => {
+          setNotifsOpen(true)
+          void api.notifications.list()
+            .then(setNotifications)
+            .catch((err: unknown) => {
+              console.error('Unable to refresh notifications:', err)
+            })
+        }}
         onOpenAdmin={() => setAdminOpen(true)}
         onProfile={() => router.push('/account')}
       />
@@ -350,6 +375,11 @@ export function ResourcXApp() {
         notifications={notifications}
         onClose={() => setNotifsOpen(false)}
         onRefresh={loadAppData}
+      />
+
+      <BookingConfirmationModal
+        open={bookingConfirmationOpen}
+        onClose={() => setBookingConfirmationOpen(false)}
       />
 
       {/* Admin modal */}

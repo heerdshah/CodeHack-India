@@ -1,8 +1,8 @@
 from fastapi import Request, HTTPException, status, Depends
 from typing import Optional, List
-from backend.app.core.config import settings
-from backend.app.core.security import decode_access_token
-from backend.app.repositories.user_repo import user_repo
+from app.core.config import settings
+from app.core.security import decode_access_token
+from app.repositories.user_repo import user_repo
 
 async def get_token_from_request(request: Request) -> Optional[str]:
     # Check httpOnly cookie first
