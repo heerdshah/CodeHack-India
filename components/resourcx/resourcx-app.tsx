@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import {
+  addDays,
   type Booking,
   type InspectionSet,
   type Mode,
@@ -11,88 +11,65 @@ import {
   type WaitlistEntry,
 } from '@/lib/resources'
 import { AgreementModal } from './agreement-modal'
-import { Hero } from './hero'
-import { InspectionModal } from './inspection-modal'
-
-import { ResourceModal } from './resource-modal'
-import { SiteNav } from './site-nav'
-import { AdminModal } from './admin-modal'
-import { NotificationsModal } from './notifications-modal'
-
 import { AuthModal } from './auth-modal'
 import { Catalogue } from './catalogue'
-
-
+import { Hero } from './hero'
+import { InspectionModal } from './inspection-modal'
 import { Mission } from './mission'
 import { OwnerDashboard } from './owner-dashboard'
-
+import { ResourceModal } from './resource-modal'
+import { SiteNav } from './site-nav'
 import { SectionHeading } from './ui'
 import { UserDashboard } from './user-dashboard'
-
-
+import { AdminModal } from './admin-modal'
+import { NotificationsModal } from './notifications-modal'
+import { ChatModal } from './chat-modal'
 import { api, type NotificationItem } from '@/lib/api'
-import { About } from './about'
-import { FeaturedResources } from './featured-resources'
-import { SearchSection } from './search-section'
-import { SiteFooter } from './site-footer'
-
 
 const scrollToDashboard = () =>
-  setTimeout(() => {
-    document
-      .getElementById('dashboard')
-      ?.scrollIntoView({ behavior: 'smooth' })
-  }, 50)
+  setTimeout(() => document.getElementById('dashboard')?.scrollIntoView({ behavior: 'smooth' }), 50)
 
 export function ResourcXApp() {
-  const router = useRouter()
-
   const [user, setUser] = useState<UserProfile | null>(null)
   const [mode, setMode] = useState<Mode>('user')
+  const [query, setQuery] = useState('')
   const [resources, setResources] = useState<Resource[]>([])
   const [bookings, setBookings] = useState<Booking[]>([])
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([])
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [authLoading, setAuthLoading] = useState(true)
 
   // Modals state
+  const [authOpen, setAuthOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const [notifsOpen, setNotifsOpen] = useState(false)
+  const [globalChatOpen, setGlobalChatOpen] = useState(false)
   const [pendingResourceId, setPendingResourceId] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [agreementId, setAgreementId] = useState<string | null>(null)
-  const [inspection, setInspection] = useState<{
-    id: string
-    phase: 'pre' | 'post'
-  } | null>(null)
+  const [inspection, setInspection] = useState<{ id: string; phase: 'pre' | 'post' } | null>(null)
 
   // Data loader
-  const loadAppData = async (
-    lat?: number | null,
-    lng?: number | null
-  ) => {
+  const loadAppData = async (lat?: number | null, lng?: number | null) => {
     try {
-      const resourceRequest = api.resources
-        .list({ lat, lng })
-        .then(setResources)
-      const bookingsRequest = api.bookings
-        .list()
-        .then(setBookings)
-        .catch(() => setBookings([]))
-      const userRequest = api.auth
-        .getMe()
-        .then(async (me) => {
-          setUser(me)
-          setNotifications(await api.notifications.list().catch(() => []))
-        })
-        .catch(() => {
-          setUser(null)
-          setNotifications([])
-        })
-        .finally(() => setAuthLoading(false))
+      const [fetchedResources, fetchedBookings] = await Promise.all([
+        api.resources.list({ lat, lng }),
+        api.bookings.list().catch(() => []),
+      ])
+      setResources(fetchedResources)
+      setBookings(fetchedBookings)
 
-      await Promise.all([resourceRequest, bookingsRequest, userRequest])
+      // Fetch user profile session
+      try {
+        const me = await api.auth.getMe()
+        if (me) {
+          setUser(me)
+          const myNotifs = await api.notifications.list().catch(() => [])
+          setNotifications(myNotifs)
+        }
+      } catch {
+        // Not authenticated yet
+      }
     } catch (err) {
       console.error('Error loading initial ResourcX data:', err)
     } finally {
@@ -101,59 +78,41 @@ export function ResourcXApp() {
   }
 
   useEffect(() => {
-    const cachedUser = window.sessionStorage.getItem('resourcx.auth-user')
-    if (cachedUser) {
-      window.sessionStorage.removeItem('resourcx.auth-user')
-      try {
-        setUser(JSON.parse(cachedUser) as UserProfile)
-      } catch {
-        window.sessionStorage.removeItem('resourcx.auth-user')
-      }
-    }
-    void loadAppData()
+    loadAppData()
   }, [])
 
-  const detail =
-    resources.find((resource) => resource.id === detailId) ?? null
+  const detail = resources.find((r) => r.id === detailId) ?? null
+  const agreement = bookings.find((b) => b.id === agreementId) ?? null
+  const inspected = bookings.find((b) => b.id === inspection?.id) ?? null
+  const resourceOf = (b: Booking | null) =>
+    b ? resources.find((r) => r.id === b.resourceId) ?? null : null
+  const mine = bookings.filter((b) => b.isMine)
 
-  const agreement =
-    bookings.find((booking) => booking.id === agreementId) ?? null
-
-  const inspected =
-    bookings.find((booking) => booking.id === inspection?.id) ?? null
-
-  const resourceOf = (booking: Booking | null) =>
-    booking
-      ? resources.find(
-          (resource) => resource.id === booking.resourceId
-        ) ?? null
-      : null
-
-  const mine = bookings.filter((booking) => booking.isMine)
-
-  const openResource = (resource: Resource) => {
+  const openResource = (r: Resource) => {
     if (!user) {
-      router.push('/sign-in')
+      setPendingResourceId(r.id)
+      setAuthOpen(true)
       return
     }
+    setDetailId(r.id)
+  }
 
-    setDetailId(resource.id)
+  const handleAuthSuccess = (u: UserProfile) => {
+    setUser(u)
+    setAuthOpen(false)
+    loadAppData()
+    if (pendingResourceId) setDetailId(pendingResourceId)
+    setPendingResourceId(null)
   }
 
   const submitRequest = async (
-    resource: Resource,
-    input: {
-      startDate: string
-      endDate: string
-      purpose: string
-      proofFiles: string[]
-    }
+    r: Resource,
+    input: { startDate: string; endDate: string; purpose: string; proofFiles: string[] }
   ) => {
     if (!user) return
-
     try {
       const result = await api.bookings.create({
-        resource_id: resource.id,
+        resource_id: r.id,
         start_date: `${input.startDate}T09:00:00Z`,
         end_date: `${input.endDate}T17:00:00Z`,
         purpose: input.purpose,
@@ -161,20 +120,14 @@ export function ResourcXApp() {
       })
 
       if (result.status === 'waitlisted') {
-        alert(
-          result.message ||
-            'Slot busy. You have been placed on the FIFO waitlist.'
-        )
+        alert(result.message || 'Slot busy. You have been placed on the FIFO waitlist.')
       }
 
       setDetailId(null)
-      void loadAppData()
+      loadAppData()
       scrollToDashboard()
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Unknown error'
-
-      alert(`Booking request failed: ${message}`)
+    } catch (err: any) {
+      alert(`Booking request failed: ${err.message}`)
     }
   }
 
@@ -182,137 +135,161 @@ export function ResourcXApp() {
     try {
       await api.bookings.updateStatus(id, 'approved')
       setAgreementId(id)
-      void loadAppData()
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Unknown error'
-
-      alert(`Approval error: ${message}`)
+      loadAppData()
+    } catch (err: any) {
+      alert(`Approval error: ${err.message}`)
     }
   }
 
   const reject = async (id: string, reason: string) => {
     try {
       await api.bookings.updateStatus(id, 'rejected', reason)
-      void loadAppData()
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Unknown error'
-
-      alert(`Rejection error: ${message}`)
+      loadAppData()
+    } catch (err: any) {
+      alert(`Rejection error: ${err.message}`)
     }
   }
 
-  const sign = async (
-    party: 'user' | 'owner',
-    dataUrl: string,
-    hash: string
-  ) => {
+  const sign = async (party: 'user' | 'owner', dataUrl: string, hash: string) => {
     if (!agreement) return
-
     try {
       await api.bookings.sign(agreement.id, {
         signer_role: party,
         signature_data: dataUrl,
         document_hash: hash,
       })
-
-      void loadAppData()
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Unknown error'
-
-      alert(`Signing error: ${message}`)
+      loadAppData()
+    } catch (err: any) {
+      alert(`Signing error: ${err.message}`)
       throw err
     }
   }
 
-  const completeInspection = (_set: InspectionSet) => {
+  const completeInspection = (set: InspectionSet) => {
     if (!inspection) return
-
-    void loadAppData()
+    loadAppData()
   }
 
-  const changeMode = (nextMode: Mode) => {
-    // Only allow mode switching for owners and administrators.
-    if (
-      nextMode === 'owner' &&
-      user &&
-      !['owner', 'admin', 'manager'].includes(
-        user.systemRole || ''
-      )
-    ) {
-      alert(
-        'Access restricted: Only facility owners and administrators can access Owner Mode.'
-      )
+  const handleSignOut = async () => {
+    try {
+      await api.auth.logout()
+    } catch (err) {
+      console.error('Error logging out:', err)
+    } finally {
+      setUser(null)
+      setMode('user')
+      setNotifications([])
+    }
+  }
+
+  const changeMode = (m: Mode) => {
+    // Only allow mode switch if user has owner or higher role
+    if (m === 'owner' && user && !['owner', 'admin', 'manager'].includes(user.systemRole || '')) {
+      alert('Access restricted: Only facility owners and administrators can access Owner Mode.')
       return
     }
-
-    setMode(nextMode)
+    setMode(m)
     scrollToDashboard()
   }
 
-  const unreadNotifsCount = notifications.filter(
-    (notification) => !notification.is_read
-  ).length
+  const unreadNotifsCount = notifications.filter((n) => !n.is_read).length
 
   return (
     <div className="min-h-screen bg-ink text-white">
       <SiteNav
-        user={user}
-        authLoading={authLoading}
+        query={query}
+        onQuery={setQuery}
         mode={mode}
         onMode={changeMode}
+        user={user}
+        onPick={openResource}
+        resourcesList={resources}
         unreadCount={unreadNotifsCount}
         onToggleNotifications={() => setNotifsOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
-        onProfile={() => router.push('/account')}
+        onProfile={() => {
+          if (!user) return setAuthOpen(true)
+          setMode('user')
+          scrollToDashboard()
+        }}
       />
 
       <main>
         <Hero />
-
-        <SearchSection
+        <Mission />
+        <Catalogue
           resources={resources}
-          onPick={openResource}
-        />
-
-        <FeaturedResources
-          resources={resources}
-          loading={loading}
+          query={query}
+          onClearQuery={() => setQuery('')}
           onView={openResource}
+          onBook={openResource}
+          onLocationSort={(lat, lng) => loadAppData(lat, lng)}
         />
 
-        <About />
-
-        
+        <section id="dashboard" aria-labelledby="dashboard-title" className="scroll-mt-28 mx-auto max-w-6xl px-5 pb-24 pt-8 sm:px-6">
+          <SectionHeading
+            index="03"
+            eyebrow={mode === 'user' ? 'Borrower Hub' : 'Facility Management'}
+            title={mode === 'user' ? 'Everything you’ve borrowed, in one ledger.' : 'Review, approve, sign, and verify.'}
+            id="dashboard-title"
+          />
+          <div className="mt-10">
+            {mode === 'user' ? (
+              <UserDashboard
+                user={user}
+                bookings={mine}
+                waitlist={waitlist}
+                resources={resources}
+                onRegister={() => setAuthOpen(true)}
+                onOpenAgreement={setAgreementId}
+                onInspect={(id, phase) => setInspection({ id, phase })}
+                onRefreshUser={loadAppData}
+              />
+            ) : (
+              <OwnerDashboard
+                bookings={bookings}
+                resources={resources}
+                onApprove={approve}
+                onReject={reject}
+                onOpenAgreement={setAgreementId}
+                onVerify={async (id) => {
+                  await api.bookings.updateStatus(id, 'completed')
+                  loadAppData()
+                }}
+              />
+            )}
+          </div>
+        </section>
       </main>
 
-      <SiteFooter />
+      <footer className="border-t border-white/10">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-5 py-8 text-xs text-stone sm:flex-row sm:justify-between sm:px-6">
+          <p>ResourcX — Intra-institutional asset sharing. No payments, full accountability.</p>
+          <p>Connected to FastAPI & Supabase</p>
+        </div>
+      </footer>
 
-      {/* Resource details and booking modal */}
+      {/* Modals */}
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        onRegister={handleAuthSuccess}
+      />
+
       {detail && user && (
         <ResourceModal
           key={detail.id}
           resource={detail}
           user={user}
-          activeBooking={mine.find(
-            (booking) =>
-              booking.resourceId === detail.id &&
-              !['completed', 'rejected', 'cancelled'].includes(
-                booking.status
-              )
-          )}
-          waitEntry={waitlist.find(
-            (entry) => entry.resourceId === detail.id
-          )}
+          activeBooking={mine.find((b) => b.resourceId === detail.id && !['completed', 'rejected', 'cancelled'].includes(b.status))}
+          waitEntry={waitlist.find((w) => w.resourceId === detail.id)}
           onClose={() => setDetailId(null)}
           onSubmit={(input) => submitRequest(detail, input)}
           onJoinWaitlist={() => {}}
         />
       )}
 
-      {/* Agreement modal */}
+      {/* Split Agreement Modal: viewer enforces borrower vs owner perspective */}
       <AgreementModal
         booking={agreement}
         resource={resourceOf(agreement)}
@@ -321,22 +298,13 @@ export function ResourcXApp() {
         onSign={sign}
         onProceed={() => {
           if (!agreement) return
-
           setAgreementId(null)
-          setInspection({
-            id: agreement.id,
-            phase: 'pre',
-          })
+          setInspection({ id: agreement.id, phase: 'pre' })
         }}
       />
 
-      {/* Inspection modal */}
       <InspectionModal
-        key={
-          inspection
-            ? `${inspection.id}-${inspection.phase}`
-            : 'none'
-        }
+        key={inspection ? `${inspection.id}-${inspection.phase}` : 'none'}
         booking={inspected}
         resource={resourceOf(inspected)}
         phase={inspection?.phase ?? 'pre'}
@@ -344,7 +312,14 @@ export function ResourcXApp() {
         onComplete={completeInspection}
       />
 
-      {/* Notifications modal */}
+      <ChatModal
+        open={globalChatOpen}
+        bookingId={mine[0]?.id || "general"}
+        resourceName={mine[0] ? (resources.find(r => r.id === mine[0].resourceId)?.name || "Active Booking") : "Direct Messages"}
+        currentUserId={user?.id}
+        onClose={() => setGlobalChatOpen(false)}
+      />
+
       <NotificationsModal
         open={notifsOpen}
         notifications={notifications}
@@ -352,7 +327,6 @@ export function ResourcXApp() {
         onRefresh={loadAppData}
       />
 
-      {/* Admin modal */}
       <AdminModal
         open={adminOpen}
         onClose={() => setAdminOpen(false)}

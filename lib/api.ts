@@ -582,6 +582,36 @@ export const api = {
   },
 
   // Admin & Operations
+
+  // Chat Messaging
+  chat: {
+    async getMessages(bookingId: string): Promise<any[]> {
+      return request<any[]>(`/chat/${bookingId}/messages`)
+    },
+    async sendMessage(bookingId: string, content: string): Promise<any> {
+      return request<any>(`/chat/${bookingId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      })
+    },
+  },
+
+  // Escrow & Payments
+  payments: {
+    async getStatus(bookingId: string): Promise<any> {
+      return request<any>(`/payments/${bookingId}`)
+    },
+    async createOrder(bookingId: string): Promise<any> {
+      return request<any>(`/payments/${bookingId}/order`, { method: 'POST' })
+    },
+    async verify(bookingId: string, paymentId?: string): Promise<any> {
+      return request<any>(`/payments/${bookingId}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ razorpay_payment_id: paymentId }),
+      })
+    },
+  },
+
   admin: {
     async listUsers(): Promise<any[]> {
       return request<any[]>('/admin/users')

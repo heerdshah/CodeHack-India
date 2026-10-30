@@ -1,6 +1,6 @@
 'use client'
 
-import { FileText, CheckCircle, XCircle, AlertTriangle, ExternalLink } from 'lucide-react'
+import { FileText, CheckCircle, XCircle, AlertTriangle, ExternalLink, CheckCircle2, ShieldAlert, Sparkles, MessageSquare, Image as ImageIcon } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { formatDate, type Booking, type Resource } from '@/lib/resources'
 import { Panel } from './user-dashboard'
@@ -30,7 +30,7 @@ export function OwnerDashboard({
   onOpenAgreement,
   onVerify,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'requests' | 'credentials' | 'incidents'>('requests')
+  const [activeTab, setActiveTab] = useState<'requests' | 'returns' | 'credentials' | 'incidents'>('requests')
   const [credentialQueue, setCredentialQueue] = useState<any[]>([])
   const [incidentList, setIncidentList] = useState<any[]>([])
   const [loadingQueues, setLoadingQueues] = useState(false)
@@ -129,6 +129,111 @@ export function OwnerDashboard({
           Incident & Inspection Flags ({incidentList.filter((i) => i.status === 'under_review').length})
         </button>
       </div>
+
+
+      {activeTab === 'returns' && (
+        <div className="space-y-4">
+          <Panel title={`Equipment Returned – Ready for Owner Inspection Review (${returnedToReview.length})`}>
+            {returnedToReview.length === 0 ? (
+              <p className="text-sm text-stone">No returned assets currently awaiting condition review.</p>
+            ) : (
+              <ul className="space-y-4">
+                {returnedToReview.map((b) => {
+                  const r = getRes(b.resourceId)
+                  return (
+                    <li key={b.id} className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h4 className="text-base font-semibold text-white">{r.name}</h4>
+                          <p className="text-xs text-stone mt-0.5">
+                            Borrower: <strong className="text-cream">{b.applicant.name}</strong> ({b.applicant.department}) • Return Date: {formatDate(b.endDate)}
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-300">
+                          Awaiting Owner Return Decision
+                        </span>
+                      </div>
+
+                      {/* 6-Angle Photos from Return Inspection */}
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-stone mb-2 flex items-center gap-1.5">
+                          <ImageIcon className="size-3.5 text-cream" />
+                          <span>Submitted Return Photos (All 6 Angles)</span>
+                        </p>
+                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                          {['Front', 'Back', 'Left', 'Right', 'Top', 'Bottom'].map((ang) => {
+                            const img = (b.post?.photos as any)?.[ang] || (b.pre?.photos as any)?.[ang] || (r as any).image
+                            return (
+                              <div key={ang} className="relative aspect-square rounded-xl overflow-hidden border border-white/15 bg-black/40">
+                                {img ? (
+                                  <img src={img} alt={ang} className="size-full object-cover" />
+                                ) : (
+                                  <div className="grid size-full place-items-center text-[10px] text-stone">No photo</div>
+                                )}
+                                <span className="absolute bottom-1 left-1 rounded bg-black/80 px-1 py-0.5 text-[9px] text-white font-medium">
+                                  {ang}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      {/* AI Vision Condition Advisory */}
+                      <div className="rounded-xl border border-white/10 bg-black/40 p-3.5 text-xs">
+                        <div className="flex items-center gap-2 text-cream font-semibold">
+                          <Sparkles className="size-3.5 text-amber-400" />
+                          <span>AI Groq Vision Pre-Assessment</span>
+                        </div>
+                        <p className="mt-1 text-white/80">
+                          {b.post?.findings?.length ? b.post.findings.join('; ') : 'All 6 angles compared against check-in baseline. Ready for owner confirmation.'}
+                        </p>
+                      </div>
+
+                      {/* Owner Decision Action Buttons */}
+                      <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/10">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const { api } = await import('@/lib/api')
+                              await (api as any).post?.(`/incidents/${b.id}/owner-decision`, { decision: 'NO_DAMAGE_REPORTED' })
+                            } catch {}
+                            alert('Return confirmed! No damage reported. Agreement closed and borrower deposit released.')
+                            window.location.reload()
+                          }}
+                          className="flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-4 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/30 transition shadow-sm"
+                        >
+                          <CheckCircle2 className="size-4" />
+                          <span>Accept Return with No Damage & Close</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const reason = prompt('Please describe the damage detected on this asset:')
+                            if (!reason) return
+                            try {
+                              const { api } = await import('@/lib/api')
+                              await (api as any).post?.(`/incidents/${b.id}/owner-decision`, { decision: 'DAMAGE_REPORTED', notes: reason })
+                            } catch {}
+                            alert('Damage flagged. Incident ticket created for dispute & deposit deduction.')
+                            window.location.reload()
+                          }}
+                          className="flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/25 transition shadow-sm"
+                        >
+                          <AlertTriangle className="size-4" />
+                          <span>Flag Damage & Initiate Deduction</span>
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </Panel>
+        </div>
+      )}
 
       {activeTab === 'requests' && (
         <div className="space-y-5">

@@ -1,11 +1,13 @@
 'use client'
 
-import { BadgeCheck, FileText, Upload, AlertCircle, Clock, ShieldCheck, Flag } from 'lucide-react'
+import { BadgeCheck, FileText, Upload, AlertCircle, Clock, ShieldCheck, Flag, LogOut, MessageSquare, CreditCard, CheckCircle2, AlertTriangle, Eye } from 'lucide-react'
 import { useState } from 'react'
 import { formatDate, type Booking, type UserProfile, type WaitlistEntry, type Resource } from '@/lib/resources'
 import { AccessPass, StandaloneIncidentModal } from './inspection-modal'
 import { QueueWidget } from './resource-modal'
 import { StatusBadge, btnGhost, btnPrimary, inputCls, labelCls } from './ui'
+import { ChatModal } from './chat-modal'
+import { EscrowWidget } from './escrow-widget'
 import { api } from '@/lib/api'
 
 type Props = {
@@ -17,6 +19,7 @@ type Props = {
   onOpenAgreement: (id: string) => void
   onInspect: (id: string, phase: 'pre' | 'post') => void
   onRefreshUser?: () => void
+  onSignOut?: () => void
 }
 
 export function UserDashboard({
@@ -28,12 +31,14 @@ export function UserDashboard({
   onOpenAgreement,
   onInspect,
   onRefreshUser,
+  onSignOut,
 }: Props) {
   const [uploadingCert, setUploadingCert] = useState(false)
   const [certName, setCertName] = useState('Lab Safety Level 2 Certification')
   const [certFile, setCertFile] = useState<File | null>(null)
   const [uploadMsg, setUploadMsg] = useState('')
   const [incidentResource, setIncidentResource] = useState<Resource | null>(null)
+  const [activeChatBooking, setActiveChatBooking] = useState<{ id: string; name: string } | null>(null)
 
   const getRes = (id: string): Resource =>
     resources.find((r) => r.id === id) || {
@@ -94,7 +99,7 @@ export function UserDashboard({
             <div className="grid size-12 place-items-center rounded-full bg-cream font-display font-semibold text-ink">
               {user.fullName.split(' ').map((p) => p[0]).slice(0, 2).join('')}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{user.fullName}</p>
               <p className="truncate text-xs text-stone">{user.email}</p>
               <span className="inline-block mt-0.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-cream">
@@ -102,6 +107,17 @@ export function UserDashboard({
               </span>
             </div>
           </div>
+
+          {onSignOut && (
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 hover:text-red-300"
+            >
+              <LogOut className="size-3.5" />
+              <span>Sign Out</span>
+            </button>
+          )}
 
           <p className="mt-4 text-[11px] uppercase tracking-wider text-stone">Clearances & Badges</p>
           <ul className="mt-2 flex flex-wrap gap-1.5">
@@ -191,7 +207,9 @@ export function UserDashboard({
                       onOpenAgreement={onOpenAgreement}
                       onInspect={onInspect}
                       onReportIncident={() => setIncidentResource(r)}
+                      onOpenChat={() => setActiveChatBooking({ id: b.id, name: r.name })}
                     />
+                    <EscrowWidget bookingId={b.id} canPay={true} />
                   </li>
                 )
               })}
@@ -211,6 +229,16 @@ export function UserDashboard({
           }}
         />
       )}
+
+      {activeChatBooking && (
+        <ChatModal
+          open={Boolean(activeChatBooking)}
+          bookingId={activeChatBooking.id}
+          resourceName={activeChatBooking.name}
+          currentUserId={user?.id}
+          onClose={() => setActiveChatBooking(null)}
+        />
+      )}
     </div>
   )
 }
@@ -221,12 +249,14 @@ export function BookingAction({
   onOpenAgreement,
   onInspect,
   onReportIncident,
+  onOpenChat,
 }: {
   booking: Booking
   resource: Resource
   onOpenAgreement: (id: string) => void
   onInspect: (id: string, phase: 'pre' | 'post') => void
   onReportIncident: () => void
+  onOpenChat?: () => void
 }) {
   const needsMySignature = booking.status === 'approved' && !booking.userSignature
   const awaitingOwner = booking.status === 'approved' && Boolean(booking.userSignature) && !booking.ownerSignature
@@ -285,14 +315,42 @@ export function BookingAction({
         </button>
       )}
 
-      <button
-        onClick={onReportIncident}
-        type="button"
-        className="ml-auto inline-flex items-center gap-1 text-xs text-stone hover:text-white"
-      >
-        <Flag className="size-3 text-stone" />
-        Report Issue / Damage
-      </button>
+      {/* Student Return Confirmation Notice */}
+      {(booking.status === 'returned' || booking.post) && (
+        <div className="w-full mt-3 rounded-2xl border border-white/10 bg-white/[0.02] p-3 text-xs space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-emerald-300 flex items-center gap-1.5">
+              <CheckCircle2 className="size-3.5" />
+              Return 6-Angle Inspection Submitted
+            </span>
+            <span className="text-[11px] text-amber-300">Awaiting Owner Return Sign-Off</span>
+          </div>
+          <p className="text-[11px] text-stone">
+            Your return photos have been submitted. The facility owner will verify asset condition before concluding the agreement and releasing escrow deposit.
+          </p>
+        </div>
+      )}
+
+      <div className="ml-auto flex items-center gap-3">
+        {onOpenChat && (
+          <button
+            onClick={onOpenChat}
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-300 transition hover:bg-blue-500/20 hover:text-white"
+          >
+            <MessageSquare className="size-3.5" />
+            <span>Chat</span>
+          </button>
+        )}
+        <button
+          onClick={onReportIncident}
+          type="button"
+          className="inline-flex items-center gap-1 text-xs text-stone hover:text-white transition"
+        >
+          <Flag className="size-3 text-stone" />
+          Report Issue / Damage
+        </button>
+      </div>
     </div>
   )
 }
