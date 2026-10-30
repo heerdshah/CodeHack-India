@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-from backend.app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository
 
 class AuditRepository(BaseRepository):
     def __init__(self):

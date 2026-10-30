@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, Dict, Any, List
-from backend.app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository
 
 class CredentialRepository(BaseRepository):
     def __init__(self):

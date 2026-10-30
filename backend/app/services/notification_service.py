@@ -7,7 +7,7 @@ from typing import Optional
 from app.core.config import settings
 from app.utils.cache import cache_get, cache_set
 from app.services.connection_manager import manager
-from backend.app.repositories.notification_repo import notification_repo
+from app.repositories.notification_repo import notification_repo
 
 logger = logging.getLogger("availo.notification")
 

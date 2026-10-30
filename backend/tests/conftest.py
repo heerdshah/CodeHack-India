@@ -16,7 +16,7 @@ if str(root_dir) not in sys.path:
 
 from starlette.testclient import TestClient
 from backend.app.main import app
-from backend.app.repositories.booking_repo import booking_repo
+from app.repositories.booking_repo import booking_repo
 
 
 @pytest.fixture(autouse=True)

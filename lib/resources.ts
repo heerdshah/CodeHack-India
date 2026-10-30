@@ -64,13 +64,22 @@ export type UserProfile = {
   isVerified?: boolean
 }
 
-export type BookingStatus = 'pending' | 'rejected' | 'approved' | 'signed' | 'active' | 'returned' | 'completed' | 'cancelled' | 'overdue'
+export type BookingStatus = 'pending' | 'waitlisted' | 'rejected' | 'approved' | 'signed' | 'active' | 'returned' | 'completed' | 'cancelled' | 'overdue'
 
 export type InspectionSet = {
+  id?: string
   photos: Record<Angle, string>
   findings: string[]
   flagged: boolean
   completedAt: string
+  aiAnalysis?: Record<string, {
+    changed?: boolean
+    description?: string
+    severity?: string
+    confidence?: number
+    retake_needed?: boolean
+  }>
+  ownerDecision?: 'damage' | 'no_damage' | null
 }
 
 export type Applicant = { name: string; role: Role; department: string; email: string }

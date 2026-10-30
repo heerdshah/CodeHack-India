@@ -3,34 +3,62 @@
  * Wraps all backend endpoints with cookie-based credentials and typed responses.
  */
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+).replace(/\/+$/, '')
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
+
   const headers = new Headers(options.headers || {})
 
-  if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
+  if (
+    options.body &&
+    !(options.body instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    credentials: 'include', // Ensures httpOnly session cookies are transmitted
-  })
+  let response: Response
+
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include',
+    })
+  } catch (error) {
+    console.error('ResourcX API connection failed:', {
+      url,
+      error,
+    })
+
+    throw new Error(
+      `Cannot connect to the ResourcX backend at ${API_BASE}. ` +
+      'Check that the backend is running and the API URL is correct.'
+    )
+  }
 
   if (!response.ok) {
     let errorDetail = 'Request failed'
+
     try {
       const errJson = await response.json()
-      errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson)
+      errorDetail =
+        errJson.detail ||
+        errJson.message ||
+        JSON.stringify(errJson)
     } catch {
       errorDetail = response.statusText || `${response.status}`
     }
+
     throw new Error(errorDetail)
   }
 
-  // If response is empty or 204
   if (response.status === 204) {
     return {} as T
   }
@@ -86,10 +114,19 @@ export type Resource = {
 }
 
 export type InspectionSet = {
+  id?: string
   photos: Record<Angle, string>
   findings: string[]
   flagged: boolean
   completedAt: string
+  aiAnalysis?: Record<string, {
+    changed?: boolean
+    description?: string
+    severity?: string
+    confidence?: number
+    retake_needed?: boolean
+  }>
+  ownerDecision?: 'damage' | 'no_damage' | null
 }
 
 export type Applicant = {
@@ -129,7 +166,9 @@ export type Agreement = {
     tailored: string[]
   }
   user_signed_at?: string
+  user_signature?: string | null
   owner_signed_at?: string
+  owner_signature?: string | null
   is_fully_signed: boolean
 }
 
@@ -156,6 +195,30 @@ export type Incident = {
   ai_summary?: string
   photos: string[]
   review_notes?: string
+}
+
+export type ChatUser = {
+  id: string
+  username: string
+  name: string
+}
+
+export type ChatConversation = {
+  id: string
+  booking_id: string | null
+  customer_id: string
+  seller_id: string
+  other_user: ChatUser
+  unread_count: number
+}
+
+export type ChatMessage = {
+  id: string
+  conversation_id: string
+  sender_id: string
+  content: string
+  is_read: boolean
+  created_at: string
 }
 
 // =============================================================================
@@ -374,6 +437,46 @@ export const api = {
       })
     },
 
+    async uploadProof(file: File): Promise<{ path: string }> {
+      const formData = new FormData()
+      formData.append('file', file)
+      return request<{ path: string }>('/bookings/proofs', {
+        method: 'POST',
+        body: formData,
+      })
+    },
+
+    async attachProof(bookingId: string, file: File): Promise<{ path: string }> {
+      const formData = new FormData()
+      formData.append('file', file)
+      return request<{ path: string }>(
+        `/bookings/${encodeURIComponent(bookingId)}/proofs`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      )
+    },
+
+    async getProof(bookingId: string, index: number): Promise<Blob> {
+      const response = await fetch(
+        `${API_BASE}/bookings/${encodeURIComponent(bookingId)}/proofs/${index}`,
+        { credentials: 'include' }
+      )
+      if (!response.ok) {
+        let detail = response.statusText || `${response.status}`
+        try {
+          const error = await response.json()
+          detail = error.detail || error.message || detail
+        } catch {
+          // Keep the HTTP status when the server does not return JSON.
+        }
+        throw new Error(detail)
+      }
+
+      return response.blob()
+    },
+
     async updateStatus(id: string, status: string, rejectionReason?: string): Promise<any> {
       return request<any>(`/bookings/${id}/status`, {
         method: 'PATCH',
@@ -449,6 +552,37 @@ export const api = {
         body: JSON.stringify(data),
       })
     },
+
+    photoUrl(bookingId: string, phase: 'pre' | 'post', angle: Angle): string {
+      return `${API_BASE}/inspections/${encodeURIComponent(bookingId)}/${phase}/photos/${encodeURIComponent(angle)}`
+    },
+
+    async getPhoto(bookingId: string, phase: 'pre' | 'post', angle: Angle): Promise<Blob> {
+      const url = `${API_BASE}/inspections/${encodeURIComponent(bookingId)}/${phase}/photos/${encodeURIComponent(angle)}`
+      const response = await fetch(url, { credentials: 'include' })
+      if (!response.ok) {
+        let detail = response.statusText || `${response.status}`
+        try {
+          const error = await response.json()
+          detail = error.detail || error.message || detail
+        } catch {
+          // Keep the HTTP status when the server does not return JSON.
+        }
+        throw new Error(detail)
+      }
+      return response.blob()
+    },
+
+    async review(
+      bookingId: string,
+      decision: 'damage' | 'no_damage',
+      notes = ''
+    ): Promise<{ status: string; decision: 'damage' | 'no_damage' }> {
+      return request(`/inspections/${encodeURIComponent(bookingId)}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ decision, notes }),
+      })
+    },
   },
 
   // Incidents
@@ -495,6 +629,41 @@ export const api = {
     },
   },
 
+  // Direct username-based chat
+  chat: {
+    async listConversations(): Promise<ChatConversation[]> {
+      return request<ChatConversation[]>('/chat/conversations')
+    },
+
+    async searchUsers(query: string): Promise<ChatUser[]> {
+      const params = new URLSearchParams({ query })
+      return request<ChatUser[]>(`/chat/users?${params.toString()}`)
+    },
+
+    async startDirect(username: string): Promise<ChatConversation> {
+      return request<ChatConversation>('/chat/direct', {
+        method: 'POST',
+        body: JSON.stringify({ username }),
+      })
+    },
+
+    async getMessages(conversationId: string): Promise<ChatMessage[]> {
+      return request<ChatMessage[]>(
+        `/chat/conversations/${encodeURIComponent(conversationId)}/messages`
+      )
+    },
+
+    async sendMessage(conversationId: string, content: string): Promise<ChatMessage> {
+      return request<ChatMessage>(
+        `/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ content }),
+        }
+      )
+    },
+  },
+
   // Admin & Operations
   admin: {
     async listUsers(): Promise<any[]> {
@@ -520,4 +689,3 @@ export const api = {
     },
   },
 }
-

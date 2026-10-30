@@ -1,7 +1,7 @@
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 import uuid
-from backend.app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository
 
 class ChatRepository(BaseRepository):
     def __init__(self):

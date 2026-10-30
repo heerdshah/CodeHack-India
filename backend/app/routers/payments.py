@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
-from backend.app.core.deps import get_current_user
-from backend.app.repositories.payment_repo import payment_repo
+from app.core.deps import get_current_user
+from app.repositories.payment_repo import payment_repo
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 

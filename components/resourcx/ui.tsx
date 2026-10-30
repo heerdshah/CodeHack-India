@@ -126,6 +126,10 @@ const STATUS_META: Record<
     label: 'Pending Owner Review',
     cls: 'bg-amber-300/10 text-amber-200 ring-amber-300/30',
   },
+  waitlisted: {
+    label: 'Waitlisted',
+    cls: 'bg-amber-300/10 text-amber-200 ring-amber-300/30',
+  },
   rejected: {
     label: 'Rejected',
     cls: 'bg-red-400/10 text-red-300 ring-red-400/30',
@@ -150,6 +154,14 @@ const STATUS_META: Record<
     label: 'Completed',
     cls: 'bg-white/5 text-stone ring-white/15',
   },
+  cancelled: {
+    label: 'Cancelled',
+    cls: 'bg-white/5 text-stone ring-white/15',
+  },
+  overdue: {
+    label: 'Overdue',
+    cls: 'bg-red-400/10 text-red-300 ring-red-400/30',
+  },
 }
 
 export function StatusBadge({
@@ -172,16 +184,24 @@ export function FileDrop({
   label,
   files,
   onFiles,
+  onSelectFiles,
   hint,
   compact = false,
+  accept = 'image/*,.pdf',
 }: {
   label: string
   files: string[]
   onFiles: (names: string[]) => void
+  onSelectFiles?: (files: File[]) => void
   hint?: string
   compact?: boolean
+  accept?: string
 }) {
   const id = useId()
+  const selectFiles = (selectedFiles: File[]) => {
+    onFiles(selectedFiles.map((file) => file.name))
+    onSelectFiles?.(selectedFiles)
+  }
 
   return (
     <div>
@@ -190,9 +210,7 @@ export function FileDrop({
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault()
-          onFiles(
-            Array.from(e.dataTransfer.files).map((file) => file.name)
-          )
+          selectFiles(Array.from(e.dataTransfer.files))
         }}
         className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-white/20 bg-white/[0.02] text-center transition hover:border-cream/50 hover:bg-white/[0.04] ${
           compact ? 'px-4 py-3' : 'px-4 py-6'
@@ -211,12 +229,10 @@ export function FileDrop({
         id={id}
         type="file"
         multiple
-        accept="image/*,.pdf"
+        accept={accept}
         className="sr-only"
         onChange={(e) => {
-          onFiles(
-            Array.from(e.target.files ?? []).map((file) => file.name)
-          )
+          selectFiles(Array.from(e.target.files ?? []))
         }}
       />
 

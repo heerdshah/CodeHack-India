@@ -1,7 +1,7 @@
 import uuid
 from typing import Optional, Dict, Any, List
-from backend.app.repositories.base import BaseRepository
-from backend.app.core.security import get_password_hash
+from app.repositories.base import BaseRepository
+from app.core.security import get_password_hash
 
 # Pre-computed bcrypt hashes for seed passwords (rounds=4 for fast startup).
 # In production with Supabase these are not used.

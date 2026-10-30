@@ -2,13 +2,13 @@ from fastapi import APIRouter, HTTPException, status, Response, Request, Depends
 from typing import Dict, Any
 from datetime import datetime, timezone
 
-from backend.app.schemas.auth import RegisterRequest, LoginRequest, UserProfileResponse
-from backend.app.repositories.user_repo import user_repo
-from backend.app.repositories.credential_repo import credential_repo
-from backend.app.repositories.audit_repo import audit_repo
-from backend.app.core.security import get_password_hash, verify_password, create_access_token
-from backend.app.core.config import settings
-from backend.app.core.deps import get_current_user
+from app.schemas.auth import RegisterRequest, LoginRequest, UserProfileResponse
+from app.repositories.user_repo import user_repo
+from app.repositories.credential_repo import credential_repo
+from app.repositories.audit_repo import audit_repo
+from app.core.security import get_password_hash, verify_password, create_access_token
+from app.core.config import settings
+from app.core.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 

@@ -1,9 +1,9 @@
 import logging
 from datetime import datetime, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from backend.app.repositories.booking_repo import booking_repo
-from backend.app.repositories.notification_repo import notification_repo
-from backend.app.repositories.audit_repo import audit_repo
+from app.repositories.booking_repo import booking_repo
+from app.repositories.notification_repo import notification_repo
+from app.repositories.audit_repo import audit_repo
 
 logger = logging.getLogger("resourcx.scheduler")
 

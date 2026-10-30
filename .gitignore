@@ -19,6 +19,12 @@ node_modules/
 
 # Python virtual env
 venv/
+backend/data/
 
 .next
 backend/.next/
+
+backend/app_backup/
+backend/repair-backup/
+backend/uploads/
+*.zip

@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Dict, Any
 
-from backend.app.schemas.user import UserUpdateRequest
-from backend.app.schemas.auth import UserProfileResponse
-from backend.app.schemas.booking import BookingResponse
-from backend.app.repositories.user_repo import user_repo
-from backend.app.repositories.booking_repo import booking_repo
-from backend.app.repositories.credential_repo import credential_repo
-from backend.app.repositories.resource_repo import resource_repo
-from backend.app.core.deps import get_current_user
+from app.schemas.user import UserUpdateRequest
+from app.schemas.auth import UserProfileResponse
+from app.schemas.booking import BookingResponse
+from app.repositories.user_repo import user_repo
+from app.repositories.booking_repo import booking_repo
+from app.repositories.credential_repo import credential_repo
+from app.repositories.resource_repo import resource_repo
+from app.core.deps import get_current_user
 
 router = APIRouter(prefix="/users", tags=["Users"])
 

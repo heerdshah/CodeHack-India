@@ -1,7 +1,10 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-from backend.app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository
+
+logger = logging.getLogger("resourcx.notifications")
 
 class NotificationRepository(BaseRepository):
     def __init__(self):
@@ -22,8 +25,7 @@ class NotificationRepository(BaseRepository):
     async def list_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         if self.is_live():
             res = self.get_client().table(self.table_name).select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
-            if res.data:
-                return res.data
+            return res.data or []
         items = [n for n in self._memory_notifs.values() if n.get("user_id") == str(user_id)]
         items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return items
@@ -36,9 +38,11 @@ class NotificationRepository(BaseRepository):
             if "is_read" not in data:
                 data["is_read"] = False
             if self.is_live():
-                res = self.get_client().table(self.table_name).insert(data).execute()
-                if res.data:
-                    return res.data[0]
+                res = self.get_client().table(self.table_name).insert(data).select("*").execute()
+                if not res.data:
+                    logger.error("Notification insert returned no row for recipient %s", data.get("user_id"))
+                    return None
+                return res.data[0]
             self._memory_notifs[data["id"]] = data
             return data
         except Exception as e:
@@ -65,4 +69,3 @@ class NotificationRepository(BaseRepository):
         return True
 
 notification_repo = NotificationRepository()
-

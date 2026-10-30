@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Lock, LockOpen, Download, CheckCircle, Clock } from 'lucide-react'
-import { formatDate, type Booking, type Resource } from '@/lib/resources'
+import { type Booking, type Resource } from '@/lib/resources'
+import type { Agreement } from '@/lib/api'
 import { SignaturePad } from './signature-pad'
-import { Modal, btnPrimary, btnGhost, inputCls, labelCls } from './ui'
+import { Modal, btnPrimary } from './ui'
 import { api } from '@/lib/api'
 
 type Props = {
@@ -12,7 +13,7 @@ type Props = {
   resource: Resource | null
   viewer: 'user' | 'owner'
   onClose: () => void
-  onSign: (party: 'user' | 'owner', dataUrl: string, hash: string) => void
+  onSign: (party: 'user' | 'owner', dataUrl: string, hash: string) => void | Promise<void>
   onProceed: () => void
 }
 
@@ -24,58 +25,78 @@ export function AgreementModal({
   onSign,
   onProceed,
 }: Props) {
-  const [reauthPassword, setReauthPassword] = useState('')
-  const [showReauth, setShowReauth] = useState(false)
-  const [pendingSignature, setPendingSignature] = useState<string | null>(null)
-  const [reauthError, setReauthError] = useState('')
-  const [isSigning, setIsSigning] = useState(false)
+  const [agreementError, setAgreementError] = useState('')
+  const [agreementData, setAgreementData] = useState<Agreement | null>(null)
+  const [loadingAgreement, setLoadingAgreement] = useState(false)
+  const bookingId = booking?.id
+
+  useEffect(() => {
+    let cancelled = false
+    setAgreementData(null)
+    setAgreementError('')
+
+    if (!bookingId) {
+      setLoadingAgreement(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setLoadingAgreement(true)
+    void api.agreements.get(bookingId)
+      .then((agreement) => {
+        if (cancelled) return
+        if (!agreement.document_hash) {
+          throw new Error('The agreement document hash is unavailable.')
+        }
+        setAgreementData(agreement)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setAgreementError(
+          err instanceof Error ? err.message : 'Unable to load the agreement terms.'
+        )
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingAgreement(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [bookingId])
 
   if (!booking || !resource) return <Modal open={false} onClose={onClose} title="">{null}</Modal>
 
-  const executed = Boolean(booking.userSignature && booking.ownerSignature)
+  const agreementLoaded = agreementData?.booking_id === booking.id
+  const borrowerSigned = agreementLoaded
+    ? Boolean(agreementData?.user_signed_at)
+    : Boolean(booking.userSignature)
+  const ownerSigned = agreementLoaded
+    ? Boolean(agreementData?.owner_signed_at)
+    : Boolean(booking.ownerSignature)
+  const borrowerSignature = agreementLoaded
+    ? agreementData?.user_signature || (borrowerSigned ? 'signed' : undefined)
+    : booking.userSignature
+  const ownerSignature = agreementLoaded
+    ? agreementData?.owner_signature || (ownerSigned ? 'signed' : undefined)
+    : booking.ownerSignature
+  const executed = borrowerSigned && ownerSigned
   const ref = `RX-${booking.id.slice(-6).toUpperCase()}`
 
-  const clauses = [
-    ['Parties', `This agreement is made between ${booking.applicant.name} (${booking.applicant.role}, ${booking.applicant.department}) — the "Borrower" — and ${resource.owner}, custodian of the ${resource.name} — the "Owner".`],
-    ['Scope & term', `Access is granted to ${resource.name} at ${resource.location} from ${formatDate(booking.startDate)} to ${formatDate(booking.endDate)} solely for: "${booking.purpose}".`],
-    ['Duty of care', 'The Borrower shall operate the asset only within certified competencies, follow posted safety procedures, never transfer access to third parties, and report any malfunction immediately.'],
-    ['Damage liability', "The Borrower accepts financial liability for damage beyond fair wear, assessed at documented repair or replacement value and charged to the Borrower's department cost centre. No payment is collected at booking."],
-    ['Inspection protocol', 'Six-angle photographs (front, back, left, right, top, bottom) are mandatory at check-in and return. AI-assisted comparison and owner verification are binding evidence of condition.'],
-    ['Termination', 'The Owner may revoke access at any time for safety, misuse, or maintenance. Disputes are resolved by the Office of Research Infrastructure.'],
-  ]
-
-  const handleSignatureCaptured = (dataUrl: string) => {
-    setPendingSignature(dataUrl)
-    setShowReauth(true)
-    setReauthError('')
-  }
-
-  const handleConfirmSignature = async () => {
-    if (!reauthPassword) {
-      return setReauthError('Please enter your account password to authorize digital signature.')
-    }
-    if (!pendingSignature) return
-
-    setIsSigning(true)
-    setReauthError('')
+  const addSignature = async (dataUrl: string) => {
+    if (
+      !agreementData ||
+      agreementData.booking_id !== booking.id ||
+      !agreementData.document_hash
+    ) throw new Error('The agreement has not loaded. Please try again before signing.')
 
     try {
-      // Fetch actual document hash from backend agreement endpoint
-      let docHash = ''
-      try {
-        const serverAgr = await api.agreements.get(booking.id)
-        docHash = serverAgr.document_hash
-      } catch {
-        docHash = ''
-      }
-      await onSign(viewer, pendingSignature, docHash)
-      setShowReauth(false)
-      setPendingSignature(null)
-      setReauthPassword('')
-    } catch (err: any) {
-      setReauthError(err.message || 'Signature authorization failed.')
-    } finally {
-      setIsSigning(false)
+      await onSign(viewer, dataUrl, agreementData.document_hash)
+      const refreshedAgreement = await api.agreements.get(booking.id)
+      setAgreementData(refreshedAgreement)
+    } catch (err: unknown) {
+      throw new Error(err instanceof Error ? err.message : 'Unable to record the signature.')
     }
   }
 
@@ -100,16 +121,46 @@ export function AgreementModal({
           </div>
         </div>
 
-        <ol className="mt-5 space-y-4">
-          {clauses.map(([h, body], i) => (
-            <li key={h}>
-              <h3 className="text-sm font-semibold">
-                {i + 1}. {h}
-              </h3>
-              <p className="mt-1 text-sm leading-relaxed text-ink/75">{body}</p>
-            </li>
-          ))}
-        </ol>
+        <dl className="mt-5 grid gap-2 rounded-xl bg-white/70 p-4 text-sm sm:grid-cols-2">
+          <div><dt className="font-semibold">Borrower</dt><dd>{booking.applicant.name}</dd></div>
+          <div><dt className="font-semibold">Resource owner</dt><dd>{resource.owner}</dd></div>
+          <div><dt className="font-semibold">Resource</dt><dd>{resource.name} · {resource.location}</dd></div>
+          <div><dt className="font-semibold">Booking period</dt><dd>{booking.startDate} – {booking.endDate}</dd></div>
+          <div className="sm:col-span-2"><dt className="font-semibold">Purpose</dt><dd>{booking.purpose}</dd></div>
+        </dl>
+
+        {loadingAgreement && <p className="mt-4 text-sm text-ink/60">Loading the agreement terms…</p>}
+        {agreementError && (
+          <p role="alert" className="mt-4 rounded-lg bg-red-100 p-3 text-sm text-red-800">
+            Unable to load the agreement: {agreementError}
+          </p>
+        )}
+        {agreementLoaded && agreementData && (
+          <div className="mt-5 space-y-4">
+            <section>
+              <h3 className="text-sm font-semibold">Mandatory institutional terms</h3>
+              <ol className="mt-2 space-y-2">
+                {agreementData.content_clauses.mandatory.map((clause, index) => (
+                  <li key={`${index}-${clause}`} className="text-sm leading-relaxed text-ink/75">
+                    {clause}
+                  </li>
+                ))}
+              </ol>
+            </section>
+            {agreementData.content_clauses.tailored.length > 0 && (
+              <section>
+                <h3 className="text-sm font-semibold">Resource-specific operational covenants</h3>
+                <ol className="mt-2 space-y-2">
+                  {agreementData.content_clauses.tailored.map((clause, index) => (
+                    <li key={`${index}-${clause}`} className="text-sm leading-relaxed text-ink/75">
+                      Special Rule {index + 1}: {clause}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
+          </div>
+        )}
 
         {/* SPLIT SIGNATURE PANELS: Viewer signs only in their mode */}
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -119,7 +170,7 @@ export function AgreementModal({
               <span className="text-xs font-semibold uppercase tracking-wider text-ink/70">
                 Borrower Signature
               </span>
-              {booking.userSignature ? (
+              {borrowerSigned ? (
                 <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
                   <CheckCircle className="size-3.5" /> Signed
                 </span>
@@ -132,18 +183,19 @@ export function AgreementModal({
 
             <p className="text-xs text-ink/60 mb-2">Signer: {booking.applicant.name}</p>
 
-            {viewer === 'user' ? (
+            {viewer === 'user' && !borrowerSigned ? (
               <SignaturePad
                 label=""
                 signer={booking.applicant.name}
-                signature={booking.userSignature}
-                onSign={handleSignatureCaptured}
+                signature={borrowerSignature}
+                onSign={addSignature}
+                disabled={loadingAgreement || !agreementLoaded}
               />
             ) : (
               <div className="h-28 rounded-lg border border-dashed border-ink/20 flex flex-col items-center justify-center p-3 text-center">
-                {booking.userSignature ? (
+                {borrowerSigned ? (
                   <span className="text-xs font-semibold text-emerald-800">
-                    Digitally countersigned by Borrower
+                    Borrower signature recorded
                   </span>
                 ) : (
                   <span className="text-xs text-ink/50 italic">
@@ -160,7 +212,7 @@ export function AgreementModal({
               <span className="text-xs font-semibold uppercase tracking-wider text-ink/70">
                 Owner Signature
               </span>
-              {booking.ownerSignature ? (
+              {ownerSigned ? (
                 <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
                   <CheckCircle className="size-3.5" /> Signed
                 </span>
@@ -173,18 +225,19 @@ export function AgreementModal({
 
             <p className="text-xs text-ink/60 mb-2">Signer: {resource.owner}</p>
 
-            {viewer === 'owner' ? (
+            {viewer === 'owner' && !ownerSigned ? (
               <SignaturePad
                 label=""
                 signer={resource.owner}
-                signature={booking.ownerSignature}
-                onSign={handleSignatureCaptured}
+                signature={ownerSignature}
+                onSign={addSignature}
+                disabled={loadingAgreement || !agreementLoaded}
               />
             ) : (
               <div className="h-28 rounded-lg border border-dashed border-ink/20 flex flex-col items-center justify-center p-3 text-center">
-                {booking.ownerSignature ? (
+                {ownerSigned ? (
                   <span className="text-xs font-semibold text-emerald-800">
-                    Digitally approved and signed by Facility Owner
+                    Owner signature recorded
                   </span>
                 ) : (
                   <span className="text-xs text-ink/50 italic">
@@ -196,45 +249,6 @@ export function AgreementModal({
           </div>
         </div>
       </article>
-
-      {/* Re-auth confirmation modal before submitting signature */}
-      {showReauth && (
-        <div className="mt-4 rounded-xl border border-cream/20 bg-panel/95 p-4 shadow-xl">
-          <h4 className="text-sm font-semibold text-cream mb-1">
-            Confirm Signature & Re-authenticate
-          </h4>
-          <p className="text-xs text-white/70 mb-3">
-            Please enter your password to cryptographically bind your digital signature and timestamp to this agreement.
-          </p>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              type="password"
-              placeholder="Account password"
-              value={reauthPassword}
-              onChange={(e) => setReauthPassword(e.target.value)}
-              className={`${inputCls} sm:max-w-xs`}
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => { setShowReauth(false); setPendingSignature(null); }}
-                className={btnGhost}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isSigning}
-                onClick={handleConfirmSignature}
-                className={btnPrimary}
-              >
-                {isSigning ? 'Authorizing...' : 'Authorize & Sign'}
-              </button>
-            </div>
-          </div>
-          {reauthError && <p className="mt-2 text-xs text-red-300">{reauthError}</p>}
-        </div>
-      )}
 
       {/* Status Bar */}
       <div
@@ -248,7 +262,7 @@ export function AgreementModal({
           <span className={executed ? 'text-emerald-100' : 'text-white/70'}>
             {executed
               ? 'Both signatures verified. Agreement executed. Check-in unlocked.'
-              : `Access locked until both signatures are verified (${[booking.userSignature, booking.ownerSignature].filter(Boolean).length}/2).`}
+              : `Access locked until both signatures are verified (${Number(borrowerSigned) + Number(ownerSigned)}/2).`}
           </span>
         </p>
         {executed && (booking.status === 'signed' || booking.status === 'approved') && booking.isMine && (

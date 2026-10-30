@@ -17,6 +17,7 @@ import { api, type NotificationItem } from '@/lib/api'
 import { About } from './about'
 import { AdminModal } from './admin-modal'
 import { AgreementModal } from './agreement-modal'
+import { BookingConfirmationModal } from './booking-confirmation-modal'
 import { FeaturedResources } from './featured-resources'
 import { Hero } from './hero'
 import { InspectionModal } from './inspection-modal'
@@ -49,6 +50,7 @@ export function ResourcXApp() {
   // Modals state
   const [adminOpen, setAdminOpen] = useState(false)
   const [notifsOpen, setNotifsOpen] = useState(false)
+  const [bookingConfirmationOpen, setBookingConfirmationOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [agreementId, setAgreementId] = useState<string | null>(null)
   const [inspection, setInspection] = useState<{
@@ -102,6 +104,29 @@ export function ResourcXApp() {
     void loadAppData()
   }, [])
 
+  useEffect(() => {
+    if (!user?.id) return
+
+    let active = true
+    const refreshNotifications = async () => {
+      try {
+        const latest = await api.notifications.list()
+        if (active) setNotifications(latest)
+      } catch (err) {
+        console.error('Unable to refresh notifications:', err)
+      }
+    }
+
+    const refresh = () => void refreshNotifications()
+    const intervalId = window.setInterval(refresh, 30_000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [user?.id])
+
   const detail =
     resources.find((resource) => resource.id === detailId) ?? null
 
@@ -135,18 +160,21 @@ export function ResourcXApp() {
       startDate: string
       endDate: string
       purpose: string
-      proofFiles: string[]
+      proofFiles: File[]
     }
   ) => {
     if (!user) return
 
     try {
+      const uploadedProofs = await Promise.all(
+        input.proofFiles.map((file) => api.bookings.uploadProof(file))
+      )
       const result = await api.bookings.create({
         resource_id: resource.id,
         start_date: `${input.startDate}T09:00:00Z`,
         end_date: `${input.endDate}T17:00:00Z`,
         purpose: input.purpose,
-        proof_files: input.proofFiles,
+        proof_files: uploadedProofs.map((proof) => proof.path),
       })
 
       if (result.status === 'waitlisted') {
@@ -154,11 +182,13 @@ export function ResourcXApp() {
           result.message ||
             'Slot busy. You have been placed on the FIFO waitlist.'
         )
+      } else {
+        setBookingConfirmationOpen(true)
       }
 
       setDetailId(null)
       void loadAppData()
-      scrollToDashboard()
+      if (result.status === 'waitlisted') scrollToDashboard()
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Unknown error'
@@ -252,7 +282,14 @@ export function ResourcXApp() {
         mode={mode}
         onMode={changeMode}
         unreadCount={unreadNotifsCount}
-        onToggleNotifications={() => setNotifsOpen(true)}
+        onToggleNotifications={() => {
+          setNotifsOpen(true)
+          void api.notifications.list()
+            .then(setNotifications)
+            .catch((err: unknown) => {
+              console.error('Unable to refresh notifications:', err)
+            })
+        }}
         onOpenAdmin={() => setAdminOpen(true)}
         onProfile={() => router.push('/account')}
       />
@@ -338,6 +375,11 @@ export function ResourcXApp() {
         notifications={notifications}
         onClose={() => setNotifsOpen(false)}
         onRefresh={loadAppData}
+      />
+
+      <BookingConfirmationModal
+        open={bookingConfirmationOpen}
+        onClose={() => setBookingConfirmationOpen(false)}
       />
 
       {/* Admin modal */}

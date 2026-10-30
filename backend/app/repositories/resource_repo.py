@@ -1,6 +1,6 @@
 import math
 from typing import Optional, Dict, Any, List
-from backend.app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0 # Earth radius in km

@@ -8,15 +8,15 @@ from typing import Optional, List, Dict, Any, Union
 from PIL import Image
 from pydantic import ValidationError
 
-from backend.app.core.config import settings
-from backend.app.ai.schemas import (
+from app.core.config import settings
+from app.ai.schemas import (
     CertificateVerificationResult,
     PhotoQualityAssessment,
     AngleDamageComparison,
     IncidentSummaryResult,
     AgreementClausesResult
 )
-from backend.app.ai.prompts import (
+from app.ai.prompts import (
     CERTIFICATE_VERIFICATION_PROMPT,
     PHOTO_QUALITY_PROMPT,
     DAMAGE_COMPARISON_PROMPT,

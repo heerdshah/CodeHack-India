@@ -3,10 +3,10 @@ from fastapi.responses import JSONResponse
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
-from backend.app.schemas.user import UserRoleUpdateRequest
-from backend.app.repositories.user_repo import user_repo
-from backend.app.repositories.audit_repo import audit_repo
-from backend.app.core.deps import require_admin, require_manager
+from app.schemas.user import UserRoleUpdateRequest
+from app.repositories.user_repo import user_repo
+from app.repositories.audit_repo import audit_repo
+from app.core.deps import require_admin, require_manager
 
 router = APIRouter(prefix="/admin", tags=["Admin & Operations"])
 
