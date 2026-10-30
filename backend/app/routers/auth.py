@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status, Response, Request, Depends
 from typing import Dict, Any
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from app.schemas.auth import RegisterRequest, LoginRequest, UserProfileResponse
 from app.repositories.user_repo import user_repo
@@ -14,6 +15,29 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # In-memory rate limiting tracker: ip -> [timestamps]
 _login_attempts: Dict[str, list] = {}
+
+
+def _auth_cookie_security_options() -> Dict[str, Any]:
+    secure = (
+        settings.ENVIRONMENT.lower() == "production"
+        or urlsplit(settings.FRONTEND_ORIGIN).scheme == "https"
+    )
+    return {
+        "secure": secure,
+        "samesite": "none" if secure else "lax",
+    }
+
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=settings.COOKIE_NAME,
+        value=token,
+        httponly=True,
+        path="/",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        **_auth_cookie_security_options(),
+    )
+
 
 def check_login_rate_limit(ip: str):
     now = datetime.now(timezone.utc).timestamp()
@@ -61,14 +85,7 @@ async def register(req: RegisterRequest, response: Response, request: Request):
 
     # Issue JWT token in httpOnly cookie
     token = create_access_token(data={"sub": created_user["id"], "role": created_user["system_role"]})
-    response.set_cookie(
-        key=settings.COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False, # Set to True in production HTTPS
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
+    _set_auth_cookie(response, token)
 
     # Audit log
     await audit_repo.log(
@@ -123,14 +140,7 @@ async def login(
 
     # Issue JWT token
     token = create_access_token(data={"sub": user["id"], "role": user.get("system_role", "user")})
-    response.set_cookie(
-        key=settings.COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
+    _set_auth_cookie(response, token)
 
     # Fetch user's approved credentials
     user_creds = await credential_repo.list_by_user(user["id"])
@@ -163,7 +173,12 @@ async def login(
 
 @router.post("/logout")
 async def logout(response: Response, request: Request, current_user: dict = Depends(get_current_user)):
-    response.delete_cookie(key=settings.COOKIE_NAME)
+    response.delete_cookie(
+        key=settings.COOKIE_NAME,
+        path="/",
+        httponly=True,
+        **_auth_cookie_security_options(),
+    )
     await audit_repo.log(
         actor_id=current_user["id"],
         actor_role=current_user.get("system_role", "user"),

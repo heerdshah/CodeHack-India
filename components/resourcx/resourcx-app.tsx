@@ -157,8 +157,17 @@ export function ResourcXApp() {
       void loadAppData()
     }
 
+    const handleSessionExpired = () => {
+      setUser(null)
+      setNotifications([])
+    }
+
     window.addEventListener('resourcx:auth-changed', handleAuthChange)
-    return () => window.removeEventListener('resourcx:auth-changed', handleAuthChange)
+    window.addEventListener('resourcx:session-expired', handleSessionExpired)
+    return () => {
+      window.removeEventListener('resourcx:auth-changed', handleAuthChange)
+      window.removeEventListener('resourcx:session-expired', handleSessionExpired)
+    }
   }, [])
 
   useEffect(() => {

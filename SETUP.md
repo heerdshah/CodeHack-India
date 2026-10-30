@@ -80,6 +80,7 @@ This guide contains the exact steps to configure, seed, and launch the ResourcX 
    cp .env.example .env.local
    ```
 3. Fill in your credentials in `backend/.env`.
+   Set `FRONTEND_ORIGIN` to the deployed frontend's origin. HTTPS origins automatically use secure, cross-site-compatible auth cookies; local HTTP origins retain development cookie settings.
 
 ---
 

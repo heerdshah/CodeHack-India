@@ -10,6 +10,11 @@ export function useCurrentUser() {
 
   useEffect(() => {
     let alive = true
+    const handleSessionExpired = () => {
+      if (alive) setUser(null)
+    }
+
+    window.addEventListener('resourcx:session-expired', handleSessionExpired)
     ;(async () => {
       try {
         const me = await api.auth.getMe()
@@ -20,6 +25,7 @@ export function useCurrentUser() {
     })()
     return () => {
       alive = false
+      window.removeEventListener('resourcx:session-expired', handleSessionExpired)
     }
   }, [])
 

@@ -156,6 +156,7 @@ export function isUserProfile(value: unknown): value is UserProfile {
 declare global {
   interface WindowEventMap {
     'resourcx:auth-changed': CustomEvent<UserProfile>
+    'resourcx:session-expired': Event
   }
 }
 

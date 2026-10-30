@@ -184,6 +184,16 @@ export default function AccountPage() {
     void loadAccount()
   }, [loadAccount])
 
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      setUser(null)
+      router.replace('/sign-in')
+    }
+
+    window.addEventListener('resourcx:session-expired', handleSessionExpired)
+    return () => window.removeEventListener('resourcx:session-expired', handleSessionExpired)
+  }, [router])
+
   const refreshBookings = useCallback(async () => {
     try {
       setBookings(await api.bookings.list())

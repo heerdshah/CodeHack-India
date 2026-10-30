@@ -1,6 +1,10 @@
 """
 test_auth.py — Auth endpoint tests (sync, starlette TestClient).
 """
+from starlette.testclient import TestClient
+
+from app.core.config import settings
+from backend.app.main import app
 
 
 def test_academic_email_validation(client):
@@ -79,6 +83,25 @@ def test_login_and_me(client):
     assert body["username"] == "priya_raman"
     assert body["system_role"] == "user"
     client.cookies.clear()
+
+
+def test_https_login_cookie_persists_for_cross_site_api(monkeypatch):
+    monkeypatch.setattr(settings, "FRONTEND_ORIGIN", "https://frontend.example")
+
+    with TestClient(app, base_url="https://backend.example") as https_client:
+        login_res = https_client.post("/auth/login", json={
+            "identifier": "p.raman@inst.edu",
+            "password": "UserPass123!"
+        })
+
+        assert login_res.status_code == 200, f"Login failed: {login_res.text}"
+        cookie = login_res.headers["set-cookie"].lower()
+        assert "httponly" in cookie
+        assert "samesite=none" in cookie
+        assert "secure" in cookie
+
+        me_res = https_client.get("/auth/me")
+        assert me_res.status_code == 200, f"/auth/me failed: {me_res.text}"
 
 
 def test_login_wrong_password(client):

@@ -3,8 +3,8 @@
 import { ArrowRight, Bell, Layers, Shield } from 'lucide-react'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
-import { api, type NotificationItem } from '@/lib/api'
-import type { Mode, UserProfile } from '@/lib/resources'
+import { api, ApiError, type NotificationItem } from '@/lib/api'
+import { AUTH_PROFILE_CACHE_KEY, type Mode, type UserProfile } from '@/lib/resources'
 import { NotificationsModal } from './notifications-modal'
 
 type Props = {
@@ -41,6 +41,18 @@ export function SiteNav({
       setNotificationsError('')
       setLocalNotifications(await api.notifications.list())
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) {
+        setLocalNotifications([])
+        setNotificationsError('')
+        try {
+          sessionStorage.removeItem(AUTH_PROFILE_CACHE_KEY)
+        } catch (storageError) {
+          console.error('Unable to clear the expired profile cache:', storageError)
+        }
+        window.dispatchEvent(new Event('resourcx:session-expired'))
+        return
+      }
+
       const message = cause instanceof Error ? cause.message : 'Unable to load notifications.'
       setNotificationsError(message)
       console.error('Unable to load notifications:', cause)

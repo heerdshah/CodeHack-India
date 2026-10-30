@@ -60,9 +60,12 @@ export function ExploreApp() {
   }
 
   useEffect(() => {
+    const handleSessionExpired = () => setUser(null)
+    window.addEventListener('resourcx:session-expired', handleSessionExpired)
     void load()
     // Load the initial catalog when this page mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => window.removeEventListener('resourcx:session-expired', handleSessionExpired)
   }, [])
 
   const mine = bookings.filter((booking) => booking.isMine)
