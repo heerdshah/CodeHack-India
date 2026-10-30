@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     FRONTEND_ORIGIN: str = "http://localhost:3000"
     frontend_origin: str = "http://localhost:3000"
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    "https://resourcx.vercel.app/",  # Add your exact live Vercel domain here
+    "https://*.vercel.app"
 
     # Email / Notifications
     SMTP_HOST: Optional[str] = None
