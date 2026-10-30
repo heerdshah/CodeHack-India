@@ -6,13 +6,6 @@ import Link from 'next/link'
 import { formatDate, type Resource } from '@/lib/resources'
 import { SectionHeading, btnGhost } from './ui'
 
-const FEATURED_IMAGES: Record<string, string> = {
-  'cnc-5axis': '/images/Gemini_Generated_Image_xhb8nixhb8nixhb8.png',
-  'ur10-cobot': '/images/Gemini_Generated_Image_xhb8nixhb8nixhb8 (1).png',
-  'sla-printer': '/images/Gemini_Generated_Image_xhb8nixhb8nixhb8 (2).png',
-  hplc: '/images/Gemini_Generated_Image_xhb8nixhb8nixhb8 (3).png',
-}
-
 export function FeaturedResources({
   resources,
   loading,
@@ -51,7 +44,7 @@ export function FeaturedResources({
           >
             <div className="relative aspect-[4/3]">
               <Image
-                src={FEATURED_IMAGES[resource.id] ?? resource.image}
+                src={resource.image}
                 alt={resource.name}
                 fill
                 sizes="(min-width:1024px) 25vw, (min-width:640px) 50vw, 100vw"

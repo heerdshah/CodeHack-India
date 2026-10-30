@@ -1,6 +1,6 @@
 'use client'
 
-import { Camera, KeyRound, ScanLine, AlertTriangle, CheckCircle2, ShieldCheck, Sparkles, Image as ImageIcon } from 'lucide-react'
+import { Camera, KeyRound, ScanLine, AlertTriangle } from 'lucide-react'
 import { useState } from 'react'
 import { ANGLES, type Angle, type Booking, type InspectionSet, type Resource } from '@/lib/resources'
 import { Modal, btnPrimary, btnGhost, inputCls, labelCls } from './ui'
@@ -159,72 +159,22 @@ export function InspectionModal({ booking, resource, phase, onClose, onComplete 
       )}
 
       {result && (
-        <div className="mt-5 space-y-4" aria-live="polite">
-          {/* 6-Angle Photo Evidence Gallery */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-stone mb-2 flex items-center gap-1.5">
-              <ImageIcon className="size-3.5 text-cream" />
-              <span>Inspection Evidence Photos (All 6 Angles)</span>
+        <div className="mt-5 space-y-3" aria-live="polite">
+          <div className={`rounded-2xl p-4 ring-1 ${result.flagged ? 'bg-amber-300/10 ring-amber-300/30' : 'bg-emerald-300/10 ring-emerald-300/30'}`}>
+            <p className="text-sm font-medium">
+              {result.flagged ? 'Scan flagged for facility owner review' : 'Scan clear — verified'}
             </p>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {ANGLES.map((angle) => {
-                const imgUrl = (result.photos && result.photos[angle]) || photos[angle]
-                return (
-                  <div key={angle} className="relative aspect-square rounded-xl overflow-hidden border border-white/20 bg-black/40">
-                    {imgUrl ? (
-                      <img src={imgUrl} alt={`${angle} inspection`} className="size-full object-cover" />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-[10px] text-stone">
-                        No photo
-                      </div>
-                    )}
-                    <span className="absolute bottom-1 left-1 rounded bg-black/80 px-1 py-0.5 text-[9px] text-white font-medium">
-                      {angle}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* AI Condition Assessment Card */}
-          <div className={`rounded-2xl p-4 ring-1 ${result.flagged ? 'bg-amber-500/10 ring-amber-500/30 text-amber-200' : 'bg-emerald-500/10 ring-emerald-500/30 text-emerald-200'}`}>
-            <div className="flex items-center gap-2">
-              {result.flagged ? (
-                <AlertTriangle className="size-4 text-amber-400 shrink-0" />
-              ) : (
-                <CheckCircle2 className="size-4 text-emerald-400 shrink-0" />
-              )}
-              <p className="text-sm font-semibold">
-                {result.flagged ? 'AI Flagged Potential Anomalies / Damage' : 'AI Inspection Clear – Baseline Verified'}
-              </p>
-            </div>
-
-            <ul className="mt-2 list-inside list-disc text-xs text-white/80 space-y-1">
-              {result.findings.map((f, idx) => (
-                <li key={idx}>{f}</li>
-              ))}
+            <ul className="mt-1.5 list-inside list-disc text-sm text-white/75">
+              {result.findings.map((f) => <li key={f}>{f}</li>)}
             </ul>
-
             {result.flagged && (
-              <p className="mt-2.5 text-[11px] text-stone border-t border-white/10 pt-2">
-                Note: AI provides advisory damage assessment. The facility owner reviews and decides on final deposit closure.
+              <p className="mt-2 text-xs text-stone">
+                Incident review ticket automatically created for {resource.owner}. No automatic penalty is charged.
               </p>
             )}
           </div>
-
-          {/* Pre-checkin Digital Key */}
           {phase === 'pre' && booking.otp && <AccessPass otp={booking.otp} resource={resource} />}
-
-          {/* Return & Closure Options */}
-          <div className="flex items-center gap-2 pt-2">
-            <button
-              onClick={close}
-              className={`${btnPrimary} flex-1 justify-center py-2.5 text-xs font-semibold`}
-            >
-              Done & Close Inspection
-            </button>
-          </div>
+          <button onClick={close} className={`${btnPrimary} w-full`}>Done</button>
         </div>
       )}
     </Modal>

@@ -8,57 +8,34 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:800
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
   const headers = new Headers(options.headers || {})
-  const method = (options.method || 'GET').toUpperCase()
-  const maxRetries = method === 'GET' ? 2 : 0
 
   if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
 
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    let response: Response
+  const response = await fetch(url, {
+    ...options,
+    headers,
+    credentials: 'include', // Ensures httpOnly session cookies are transmitted
+  })
+
+  if (!response.ok) {
+    let errorDetail = 'Request failed'
     try {
-      response = await fetch(url, {
-        ...options,
-        headers,
-        credentials: 'include', // Ensures httpOnly session cookies are transmitted
-      })
-    } catch (error) {
-      if (attempt < maxRetries && error instanceof TypeError) {
-        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
-        continue
-      }
-      throw error
+      const errJson = await response.json()
+      errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson)
+    } catch {
+      errorDetail = response.statusText || `${response.status}`
     }
-
-    if (!response.ok) {
-      let errorDetail = 'Request failed'
-      try {
-        const errJson = await response.json()
-        errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson)
-      } catch {
-        errorDetail = response.statusText || `${response.status}`
-      }
-
-      const isConnectionReset =
-        response.status >= 500 &&
-        /winerror\s*10054|connection.*(?:reset|forcibly closed)/i.test(errorDetail)
-      if (attempt < maxRetries && isConnectionReset) {
-        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
-        continue
-      }
-      throw new Error(errorDetail)
-    }
-
-    // If response is empty or 204
-    if (response.status === 204) {
-      return {} as T
-    }
-
-    return response.json()
+    throw new Error(errorDetail)
   }
 
-  throw new Error('Request failed after retrying a temporary connection error.')
+  // If response is empty or 204
+  if (response.status === 204) {
+    return {} as T
+  }
+
+  return response.json()
 }
 
 // =============================================================================
@@ -179,28 +156,6 @@ export type Incident = {
   ai_summary?: string
   photos: string[]
   review_notes?: string
-}
-
-export type ChatConversation = {
-  id: string
-  booking_id: string | null
-  customer_id: string
-  seller_id: string
-  other_user: {
-    id: string
-    username: string
-    name: string
-  }
-  unread_count: number
-}
-
-export type ChatMessage = {
-  id: string
-  conversation_id: string
-  sender_id: string
-  content: string
-  is_read: boolean
-  created_at: string
 }
 
 // =============================================================================
@@ -540,78 +495,7 @@ export const api = {
     },
   },
 
-  // Direct and booking-scoped chat
-  chat: {
-    async listConversations(): Promise<ChatConversation[]> {
-      return request<ChatConversation[]>('/chat/conversations')
-    },
-
-    async createConversation(bookingId: string): Promise<ChatConversation> {
-      return request<ChatConversation>('/chat/conversations', {
-        method: 'POST',
-        body: JSON.stringify({ booking_id: bookingId }),
-      })
-    },
-
-    async createDirectConversation(username: string): Promise<ChatConversation> {
-      return request<ChatConversation>('/chat/direct', {
-        method: 'POST',
-        body: JSON.stringify({ username }),
-      })
-    },
-
-    async listMessages(conversationId: string): Promise<ChatMessage[]> {
-      return request<ChatMessage[]>(`/chat/conversations/${conversationId}/messages`)
-    },
-
-    async sendMessage(conversationId: string, content: string): Promise<ChatMessage> {
-      return request<ChatMessage>(`/chat/conversations/${conversationId}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({ content }),
-      })
-    },
-
-    async markRead(conversationId: string): Promise<void> {
-      await request(`/chat/conversations/${conversationId}/read`, { method: 'POST' })
-    },
-
-    async getRealtimeToken(): Promise<string> {
-      const result = await request<{ token: string }>('/chat/realtime-token')
-      return result.token
-    },
-  },
-
   // Admin & Operations
-
-  // Chat Messaging
-  chat: {
-    async getMessages(bookingId: string): Promise<any[]> {
-      return request<any[]>(`/chat/${bookingId}/messages`)
-    },
-    async sendMessage(bookingId: string, content: string): Promise<any> {
-      return request<any>(`/chat/${bookingId}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({ content }),
-      })
-    },
-  },
-
-  // Escrow & Payments
-  payments: {
-    async getStatus(bookingId: string): Promise<any> {
-      return request<any>(`/payments/${bookingId}`)
-    },
-    async createOrder(bookingId: string): Promise<any> {
-      return request<any>(`/payments/${bookingId}/order`, { method: 'POST' })
-    },
-    async verify(bookingId: string, paymentId?: string): Promise<any> {
-      return request<any>(`/payments/${bookingId}/verify`, {
-        method: 'POST',
-        body: JSON.stringify({ razorpay_payment_id: paymentId }),
-      })
-    },
-  },
-
   admin: {
     async listUsers(): Promise<any[]> {
       return request<any[]>('/admin/users')
@@ -636,3 +520,4 @@ export const api = {
     },
   },
 }
+

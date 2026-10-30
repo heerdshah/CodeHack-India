@@ -64,7 +64,7 @@ export type UserProfile = {
   isVerified?: boolean
 }
 
-export type BookingStatus = 'pending' | 'rejected' | 'approved' | 'signed' | 'active' | 'returned' | 'completed' | 'waitlisted' | 'cancelled' | 'overdue'
+export type BookingStatus = 'pending' | 'rejected' | 'approved' | 'signed' | 'active' | 'returned' | 'completed' | 'cancelled' | 'overdue'
 
 export type InspectionSet = {
   photos: Record<Angle, string>
